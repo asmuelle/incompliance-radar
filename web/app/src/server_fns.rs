@@ -1,11 +1,17 @@
 use domain::ComplianceCase;
 use leptos::prelude::*;
 
-/// Lists tracked compliance cases. Backed by in-memory demo data today;
-/// swap the body for a repository call once persistence is added.
+/// Lists tracked compliance cases from the repository provided via Leptos
+/// context (see `web/server/src/main.rs`). Fully-qualified path keeps the
+/// client (wasm) build free of the `db` crate, which is only pulled in under
+/// the `ssr` feature.
 #[server(endpoint = "/list_cases")]
 pub async fn list_cases() -> Result<Vec<ComplianceCase>, ServerFnError> {
-    Ok(crate::seed::seed_cases())
+    let repo = use_context::<std::sync::Arc<dyn db::CaseRepository>>()
+        .ok_or_else(|| ServerFnError::new("case repository not available"))?;
+    repo.list()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
 }
 
 /// Runs a free-form prompt against whichever LLM backend is configured via

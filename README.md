@@ -13,10 +13,11 @@ Project docs: **[asmuelle.github.io/incompliance-radar](https://asmuelle.github.
 
 ## Status
 
-Early-stage scaffold: a working full-stack app with in-memory demo data and
-a live LLM query panel. The crawler, NLP extraction pipeline, search/alerting
-described in `spec.md` are not built yet. See [`CLAUDE.md`](CLAUDE.md) for the
-current architecture and what's next.
+Early-stage scaffold: a working full-stack app with SQLite-backed persistence
+(seeded with fictional demo data on first run) and a live LLM query panel.
+The crawler, NLP extraction pipeline, search/alerting described in `spec.md`
+are not built yet. See [`CLAUDE.md`](CLAUDE.md) for the current architecture
+and what's next.
 
 ## Getting started
 
@@ -50,6 +51,7 @@ ANTHROPIC_API_KEY=sk-...
 ```
 crates/domain/   Core compliance domain types (wasm-safe)
 crates/llm/      LLM provider abstraction (Ollama + Anthropic)
+crates/db/       Persistence (CaseRepository trait + SQLite)
 web/app/         Shared Leptos UI + server functions
 web/frontend/    Wasm hydration entry point
 web/server/      Axum server binary

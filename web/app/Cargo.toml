@@ -16,10 +16,12 @@ chrono = { workspace = true }
 # ssr-only: used inside `#[server]` function bodies (fully-qualified paths),
 # never referenced from client-compiled code.
 llm = { path = "../../crates/llm", optional = true }
+db = { path = "../../crates/db", optional = true }
 
 [features]
 ssr = [
   "leptos/ssr",
   "leptos_meta/ssr",
   "dep:llm",
+  "dep:db",
 ]

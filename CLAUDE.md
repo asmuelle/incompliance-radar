@@ -25,16 +25,19 @@ crates/
   llm/        Pluggable LLM provider abstraction. `LlmProvider` trait +
               `OllamaProvider` (local models) + `AnthropicProvider` (frontier).
               Server-only (uses reqwest/tokio); never a wasm target.
+  db/         Persistence. `CaseRepository` trait + `SqliteCaseRepository`
+              (sqlx). Server-only; never a wasm target.
 web/
   app/        Shared UI: the `App` component, `shell()` HTML document,
-              `#[server]` functions (server_fns.rs), and in-memory seed data
-              (seed.rs). Compiles for BOTH native (ssr feature) and wasm32
-              (used by `frontend`). This is the crate you touch for almost
-              all UI and server-function changes.
+              `#[server]` functions (server_fns.rs), and fictional seed data
+              (seed.rs, used to populate an empty database on first run).
+              Compiles for BOTH native (ssr feature) and wasm32 (used by
+              `frontend`). This is the crate you touch for almost all UI and
+              server-function changes.
   frontend/   Thin wasm hydration entry point only (`hydrate()` +
               `wasm_bindgen`). Rarely needs edits.
-  server/     Axum binary (`main.rs`). Wires up leptos_routes + static file
-              serving. Rarely needs edits.
+  server/     Axum binary (`main.rs`). Connects/migrates/seeds the database,
+              wires up leptos_routes + static file serving.
   style/      Plain CSS (main.css) — no Sass toolchain required.
 ```
 
@@ -42,18 +45,18 @@ web/
 
 cargo-leptos needs one crate compiled for wasm32 (client) and one compiled
 natively (server), from a *shared* UI crate. Server-only dependencies (axum,
-tokio, sqlx, `llm`) must never leak into a crate that gets built for
+tokio, sqlx, `llm`, `db`) must never leak into a crate that gets built for
 wasm32-unknown-unknown, or the wasm build breaks. Concretely:
 
 - `crates/domain` has zero ssr-only dependencies — it's imported by all of
   `app`, `frontend`, and `server`, native and wasm alike.
-- `web/app`'s `llm` dependency is `optional = true`, gated behind the `ssr`
-  feature. `server_fns.rs` calls it via **fully-qualified paths**
-  (`llm::provider_from_env()`, `llm::LlmProvider::complete(...)`) instead of a
-  top-level `use llm::...;`, because the `#[server]` macro only compiles the
-  function *body* under the `ssr` feature — a top-level `use` statement is a
-  plain module item and would break the wasm build if the crate weren't
-  available there.
+- `web/app`'s `llm` and `db` dependencies are `optional = true`, gated behind
+  the `ssr` feature. `server_fns.rs` calls them via **fully-qualified paths**
+  (`llm::provider_from_env()`, `db::CaseRepository`) instead of a top-level
+  `use llm::...;` / `use db::...;`, because the `#[server]` macro only
+  compiles the function *body* under the `ssr` feature — a top-level `use`
+  statement is a plain module item and would break the wasm build if the
+  crate weren't available there.
 - Don't add axum/tokio/sqlx/reqwest as unconditional dependencies of
   `web/app` — always gate them behind `ssr` the same way.
 
@@ -75,6 +78,31 @@ backend (e.g. OpenAI, a candle-based local backend): implement the trait in
 The `ask_llm` server function (`web/app/src/server_fns.rs`) demonstrates the
 end-to-end wiring: UI → server fn → `llm::provider_from_env()` → whichever
 backend is configured.
+
+## Persistence
+
+`crates/db` defines `CaseRepository` (`list`/`get`/`upsert`/`delete`) and the
+only implementation, `SqliteCaseRepository`. Each case is stored as a JSON
+blob (the full `domain::ComplianceCase`, including nested resolutions/
+monitors/sanctions) alongside a few indexed columns — see
+`crates/db/migrations/0001_create_compliance_cases.sql` for why the schema
+isn't normalized further yet.
+
+`web/server/src/main.rs` connects (creating the SQLite file and running
+migrations if needed), seeds the fictional demo cases from `app::seed` only
+if the database is empty, wraps the repository in `Arc<dyn CaseRepository>`,
+and makes it available to server functions via
+`leptos_axum::LeptosRoutes::leptos_routes_with_context` +
+`provide_context(repo.clone())`. `list_cases` in `web/app/src/server_fns.rs`
+retrieves it with `use_context::<Arc<dyn db::CaseRepository>>()`.
+
+Configured via `DATABASE_URL` (see `.env.example`), default
+`sqlite://incompliance-radar.db?mode=rwc` (created relative to the working
+directory the server binary is run from).
+
+To add a write path (crawler ingestion, manual curation UI, etc.), call
+`CaseRepository::upsert` from a new server function the same way — the trait
+already supports it, only a caller is missing.
 
 ## Commands
 
@@ -98,13 +126,16 @@ fails with a schema-version mismatch — `cargo install wasm-bindgen-cli
 
 ## Current known gaps (documented, not silently missing)
 
-There is no persistence layer yet — `list_cases()` in `web/app/src/seed.rs`
-returns hardcoded fictional demo data. Before building the real crawler/NLP
-pipeline from `spec.md`, the natural next step is a `crates/db` (or `sqlx`
-directly in `web/server`) repository layer behind a trait, following the
-Repository Pattern already used for `LlmProvider`. Don't add a database
-dependency to `web/app` directly — keep it server-only per the ssr-gating
-rules above.
+There is no crawler or NLP extraction pipeline yet — the database only ever
+contains the fictional demo seed data (or whatever's manually inserted via
+`CaseRepository::upsert`). Building the real ingestion pipeline from
+`spec.md` is the natural next step; feed it through the same
+`CaseRepository` trait rather than a new storage path.
+
+There is no search/filtering UI yet, even though the schema indexes
+`industry`/`jurisdiction` for it. Add query methods to `CaseRepository` as
+real filter requirements emerge, rather than fetching everything via `list()`
+and filtering client-side.
 
 There is no routing (`leptos_router`) yet — the app is a single page. Add it
 when there's a second page to justify it (YAGNI).
