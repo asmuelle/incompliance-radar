@@ -1,0 +1,8 @@
+/target
+/web/target
+node_modules/
+.env
+.env.local
+*.db
+*.sqlite
+.DS_Store

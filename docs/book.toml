@@ -1,0 +1,12 @@
+[book]
+title = "incomplianceRadar"
+description = "AI-powered platform for tracking global compliance monitorships, DPAs and NPAs"
+authors = ["incomplianceRadar contributors"]
+src = "src"
+language = "en"
+
+[output.html]
+git-repository-url = "https://github.com/asmuelle/incompliance-radar"
+edit-url-template = "https://github.com/asmuelle/incompliance-radar/edit/main/docs/{path}"
+default-theme = "navy"
+preferred-dark-theme = "navy"

@@ -1,0 +1,19 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[dependencies]
+app = { path = "../app", features = ["ssr"] }
+axum = { version = "0.8" }
+leptos = { version = "0.8", features = ["ssr"] }
+leptos_axum = { version = "0.8" }
+leptos_meta = { version = "0.8", features = ["ssr"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "net"] }
+tower-http = { version = "0.6", features = ["fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/domain",
+  "crates/llm",
+  "web/app",
+  "web/frontend",
+  "web/server",
+]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde", "js"] }
+tokio = { version = "1", features = ["macros"] }
+
+[[workspace.metadata.leptos]]
+name = "incompliance-radar"
+bin-package = "server"
+lib-package = "frontend"
+
+output-name = "incompliance-radar"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+site-addr = "127.0.0.1:3000"
+reload-port = 3001
+style-file = "web/style/main.css"
+assets-dir = "web/assets"

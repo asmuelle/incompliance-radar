@@ -1,0 +1,10 @@
+[package]
+name = "domain"
+version = "0.1.0"
+edition = "2021"
+description = "Core domain models for incomplianceRadar: companies, monitorships, DPAs/NPAs, monitors, sanctions."
+
+[dependencies]
+serde = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }

@@ -1,0 +1,25 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+domain = { path = "../../crates/domain" }
+leptos = { version = "0.8" }
+leptos_meta = { version = "0.8" }
+serde = { workspace = true }
+chrono = { workspace = true }
+
+# ssr-only: used inside `#[server]` function bodies (fully-qualified paths),
+# never referenced from client-compiled code.
+llm = { path = "../../crates/llm", optional = true }
+
+[features]
+ssr = [
+  "leptos/ssr",
+  "leptos_meta/ssr",
+  "dep:llm",
+]
