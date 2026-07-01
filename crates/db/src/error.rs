@@ -8,4 +8,7 @@ pub enum RepositoryError {
 
     #[error("failed to (de)serialize case data: {0}")]
     Serialization(#[from] serde_json::Error),
+
+    #[error("failed to decode stored value: {0}")]
+    Decode(String),
 }

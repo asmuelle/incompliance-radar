@@ -10,7 +10,8 @@ crates/
               Monitor, Sanction, ViolationType, Regulator).
   llm/        Pluggable LLM provider abstraction (Ollama + Anthropic),
               server-only.
-  db/         Persistence: CaseRepository trait + SqliteCaseRepository,
+  db/         Persistence: CaseRepository + AlertRepository traits,
+              SqliteCaseRepository/SqliteAlertRepository (share one pool),
               server-only.
   extraction/ LLM-based structured extraction of a ComplianceCase from raw
               filing text, server-only.
@@ -84,6 +85,17 @@ The UI's `SearchPanel` filters by industry, jurisdiction, violation type, and
 law firm/monitor, calling `list_cases` with a `CaseFilterQuery` (an all-`None`
 filter matches everything). `CaseList`'s data resource refetches whenever the
 filter changes or an extraction completes.
+
+## Alerts
+
+Global watch rules (industry and/or company-name-substring criteria), not
+per-user — the app has no auth/user system. `db::evaluate_case` checks a
+newly-persisted case against every rule and records a `domain::Alert` for
+each match; both `extract_case` and the crawler's `ingest_filing` call it
+right after `CaseRepository::upsert`, so a case triggers alerts the same way
+regardless of how it arrived. The UI's `WatchRulesPanel` manages rules;
+`AlertsPanel` shows and acknowledges triggered alerts. There's no actual
+notification delivery (email/push) — alerts only show up in-app.
 
 ## Data flow (current state)
 

@@ -12,6 +12,7 @@ leptos = { version = "0.8" }
 leptos_meta = { version = "0.8" }
 serde = { workspace = true }
 chrono = { workspace = true }
+uuid = { workspace = true }
 
 # ssr-only: used inside `#[server]` function bodies (fully-qualified paths),
 # never referenced from client-compiled code.

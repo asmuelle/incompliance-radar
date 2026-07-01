@@ -1,4 +1,4 @@
-use crate::{CaseFilter, CaseRepository, RepositoryError};
+use crate::{CaseFilter, CaseRepository, RepositoryError, SqliteAlertRepository};
 use async_trait::async_trait;
 use domain::ComplianceCase;
 use sqlx::sqlite::SqlitePoolOptions;
@@ -32,6 +32,14 @@ impl SqliteCaseRepository {
     fn row_to_case(row: &sqlx::sqlite::SqliteRow) -> Result<ComplianceCase, RepositoryError> {
         let data: String = row.try_get("data")?;
         Ok(serde_json::from_str(&data)?)
+    }
+
+    /// Builds an [`AlertRepository`](crate::AlertRepository) sharing this
+    /// repository's connection pool rather than opening a second connection
+    /// to the same database file — migrations (including the watch_rules/
+    /// alerts tables) already ran during `connect`.
+    pub fn alert_repository(&self) -> SqliteAlertRepository {
+        SqliteAlertRepository::new(self.pool.clone())
     }
 }
 

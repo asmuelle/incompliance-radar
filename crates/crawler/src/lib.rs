@@ -49,11 +49,15 @@ pub struct CrawlSummary {
     pub skipped_not_applicable: usize,
     pub extracted: usize,
     pub failed: usize,
+    /// Watch-rule matches recorded across all newly-extracted cases this run.
+    pub alerts_triggered: usize,
 }
 
 /// Fetches recent filings from `source`, skips any whose URL is already
 /// recorded as a resolution's `source` on an existing case, and extracts +
-/// persists the rest via `provider` and `repo`.
+/// persists the rest via `provider` and `repo`, checking each newly-persisted
+/// case against `alert_repo`'s watch rules the same way manual extraction
+/// does (see `db::evaluate_case`).
 ///
 /// A single filing failing to extract or persist is logged and counted in
 /// `failed` rather than aborting the run — a malformed press release
@@ -62,6 +66,7 @@ pub async fn run_crawl(
     source: &dyn FilingSource,
     provider: &dyn llm::LlmProvider,
     repo: &dyn db::CaseRepository,
+    alert_repo: &dyn db::AlertRepository,
 ) -> Result<CrawlSummary, CrawlerError> {
     let filings = source.fetch_recent().await?;
     let existing = existing_source_urls(repo).await?;
@@ -76,7 +81,7 @@ pub async fn run_crawl(
             summary.skipped_existing += 1;
             continue;
         }
-        ingest_filing(&filing, provider, repo, &mut summary).await;
+        ingest_filing(&filing, provider, repo, alert_repo, &mut summary).await;
     }
 
     Ok(summary)
@@ -97,6 +102,7 @@ async fn ingest_filing(
     filing: &RawFiling,
     provider: &dyn llm::LlmProvider,
     repo: &dyn db::CaseRepository,
+    alert_repo: &dyn db::AlertRepository,
     summary: &mut CrawlSummary,
 ) {
     let mut case = match extraction::extract_case(provider, &filing.text).await {
@@ -122,6 +128,12 @@ async fn ingest_filing(
         Err(err) => {
             tracing::error!(url = %filing.url, %err, "failed to persist extracted case");
             summary.failed += 1;
+            return;
         }
+    }
+
+    match db::evaluate_case(&case, alert_repo).await {
+        Ok(alerts) => summary.alerts_triggered += alerts.len(),
+        Err(err) => tracing::error!(url = %filing.url, %err, "failed to evaluate watch rules"),
     }
 }

@@ -25,8 +25,9 @@ crates/
   llm/        Pluggable LLM provider abstraction. `LlmProvider` trait +
               `OllamaProvider` (local models) + `AnthropicProvider` (frontier).
               Server-only (uses reqwest/tokio); never a wasm target.
-  db/         Persistence. `CaseRepository` trait + `SqliteCaseRepository`
-              (sqlx). Server-only; never a wasm target.
+  db/         Persistence. `CaseRepository` + `AlertRepository` traits,
+              `SqliteCaseRepository`/`SqliteAlertRepository` (sqlx, sharing
+              one connection pool). Server-only; never a wasm target.
   extraction/ LLM-based structured extraction of a `ComplianceCase` from raw
               filing text (schema-constrained prompt + JSON parse +
               validation). Depends on `llm` and `domain`; server-only.
@@ -108,6 +109,14 @@ client-side. Revisit only if `violation_type`/`monitor_firm` filtering needs
 to scale past an in-memory scan (add real columns or a junction table, or use
 SQLite's `json_each`).
 
+`db` also defines `AlertRepository` (`list_rules`/`create_rule`/`delete_rule`/
+`list_alerts`/`record_alert`/`acknowledge_alert`), implemented by
+`SqliteAlertRepository` — see the Alerts section below. It shares its
+`SqlitePool` with `SqliteCaseRepository` via
+`SqliteCaseRepository::alert_repository()` rather than opening a second
+connection to the same database file; both tables' migrations run together
+when `SqliteCaseRepository::connect` runs `sqlx::migrate!`.
+
 `web/server/src/main.rs` connects (creating the SQLite file and running
 migrations if needed), seeds the fictional demo cases from `app::seed` only
 if the database is empty, wraps the repository in `Arc<dyn CaseRepository>`,
@@ -182,12 +191,14 @@ brace at all. Don't lower it without re-testing against real filing text.
 `crates/crawler` feeds real filings into `extraction::extract_case`
 automatically instead of requiring manual paste. `FilingSource` is the
 per-regulator trait (`fetch_recent() -> Vec<RawFiling>`); `run_crawl(source,
-provider, repo)` fetches, dedupes against URLs already recorded as a
-resolution's `source` on an existing case (an O(n) full-table scan via
+provider, repo, alert_repo)` fetches, dedupes against URLs already recorded
+as a resolution's `source` on an existing case (an O(n) full-table scan via
 `repo.list()` — fine at today's scale, revisit with a dedicated indexed query
 if the case count grows large), and calls `extraction::extract_case` +
-`CaseRepository::upsert` for the rest. One filing failing extraction or
-persistence is logged and counted, not fatal to the run.
+`CaseRepository::upsert` + `db::evaluate_case` for the rest — a crawled case
+triggers watch-rule alerts the same way a manually-pasted one does. One
+filing failing extraction or persistence is logged and counted, not fatal to
+the run.
 
 Two connectors exist today, both verified against the live sites (not just
 written from guessed HTML structure):
@@ -248,6 +259,37 @@ monitor-firm stay free-text inputs since the underlying data is free text too.
 `db::sqlite::matches_case` and for rendering resolution details in
 `case_list_item`/`resolution_list_item`.
 
+## Alerts
+
+Global watch rules, **not per-user** — this app has no auth/user system (a
+deliberate scope decision, not an oversight; see Current known gaps).
+`domain::WatchRule` (`industry`/`company_name_contains`, ANDed, case-
+insensitive substring match on company name) has a pure `matches(&self, case)`
+method with no DB dependency, so it's fully unit-testable without a database
+(see `crates/domain/src/watch_rule.rs` tests). A rule with no criteria set
+never matches anything — it's not "match everything".
+
+`db::evaluate_case(case, alert_repo)` lists all rules, checks each against
+`case`, and calls `AlertRepository::record_alert` for every match, returning
+the triggered `domain::Alert`s. Both places that persist a newly-extracted
+case call it right after `CaseRepository::upsert` succeeds: the `extract_case`
+server function (`web/app/src/server_fns.rs`) and the crawler's
+`ingest_filing` (`crates/crawler/src/lib.rs`) — a case triggers alerts the
+same way whether it arrived via manual paste or an automated fetch. A
+watch-rule evaluation failure is logged, not propagated — the case is already
+safely persisted by that point, so a broken alert check shouldn't make the
+whole extraction look like it failed.
+
+`domain::Alert` copies `watch_rule_label` and `company_name` at creation time
+rather than joining `watch_rule_id`/`case_id` on every read, so the alert feed
+stays readable even after a rule or case is later deleted (the `alerts` table
+has no foreign keys — see `0002_create_watch_rules_and_alerts.sql`).
+
+UI: `WatchRulesPanel` (form + list + delete) and `AlertsPanel` (list +
+acknowledge), both in `web/app/src/app.rs`. `AlertsPanel`'s resource refetches
+on `(extract_action.version(), acknowledge_action.version())` — either a new
+extraction (which might trigger alerts) or an acknowledgment.
+
 ## Commands
 
 ```bash
@@ -283,6 +325,14 @@ Search only covers the four fields in `CaseFilter`. There's no free-text
 search across obligations/sanctions descriptions, no date-range filtering,
 and no pagination — fine at today's scale (a handful of cases), revisit once
 the crawler has been running long enough to accumulate a real backlog.
+
+Alerts are global watch rules, not per-user — there's no auth/user system at
+all (deliberate: building real per-user scoping means building authentication
+first, which is a much bigger scope jump; see Roadmap in the docs site for
+the tradeoff as discussed). There's also no actual notification delivery
+(email/SMS/push) — alerts only ever show up in the in-app `AlertsPanel`;
+adding a delivery channel means picking and configuring an external service
+(SMTP, a push provider, ...), deliberately out of scope for this scaffold.
 
 ## Conventions
 

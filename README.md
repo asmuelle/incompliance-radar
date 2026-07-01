@@ -16,9 +16,10 @@ Project docs: **[asmuelle.github.io/incompliance-radar](https://asmuelle.github.
 Early-stage scaffold: a working full-stack app with SQLite-backed persistence
 (seeded with fictional demo data on first run), a live LLM query panel, an
 LLM-based extraction pipeline, a crawler that pulls real press releases from
-the SEC and FCA and feeds them through it automatically, and search/filtering
-by industry, jurisdiction, violation type, and law firm/monitor. Alerting and
-trend analysis described in `spec.md` are not built yet. See
+the SEC and FCA and feeds them through it automatically, search/filtering by
+industry, jurisdiction, violation type, and law firm/monitor, and global
+watch-rule alerts (industry/competitor watch — not per-user, this app has no
+auth system). Trend analysis described in `spec.md` is not built yet. See
 [`CLAUDE.md`](CLAUDE.md) for the current architecture and what's next.
 
 ## Getting started
@@ -66,7 +67,7 @@ why there's no DoJ connector.
 ```
 crates/domain/   Core compliance domain types (wasm-safe)
 crates/llm/      LLM provider abstraction (Ollama + Anthropic)
-crates/db/       Persistence (CaseRepository trait + SQLite)
+crates/db/       Persistence (CaseRepository + AlertRepository traits, SQLite)
 crates/extraction/  LLM-based structured extraction from raw filing text
 crates/crawler/  Scheduled fetch jobs (SEC + FCA) feeding extraction
 web/app/         Shared Leptos UI + server functions

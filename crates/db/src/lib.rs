@@ -3,13 +3,17 @@
 //! the concrete storage engine. [`SqliteCaseRepository`] is the only
 //! implementation today.
 
+mod alert_repository;
 mod error;
 mod filter;
 mod sqlite;
+mod sqlite_alerts;
 
+pub use alert_repository::{evaluate_case, AlertRepository};
 pub use error::RepositoryError;
 pub use filter::CaseFilter;
 pub use sqlite::SqliteCaseRepository;
+pub use sqlite_alerts::SqliteAlertRepository;
 
 use async_trait::async_trait;
 use domain::ComplianceCase;

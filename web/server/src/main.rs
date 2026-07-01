@@ -1,6 +1,6 @@
 use app::{shell, App};
 use axum::Router;
-use db::{CaseRepository, SqliteCaseRepository};
+use db::{AlertRepository, CaseRepository, SqliteCaseRepository};
 use leptos::config::get_configuration;
 use leptos::prelude::provide_context;
 use leptos_axum::{generate_route_list, LeptosRoutes};
@@ -19,7 +19,9 @@ async fn main() {
     let addr = leptos_options.site_addr;
     let routes = generate_route_list(App);
 
-    let repo: Arc<dyn CaseRepository> = Arc::new(connect_and_seed().await);
+    let sqlite_repo = connect_and_seed().await;
+    let alert_repo: Arc<dyn AlertRepository> = Arc::new(sqlite_repo.alert_repository());
+    let repo: Arc<dyn CaseRepository> = Arc::new(sqlite_repo);
 
     let router = Router::new()
         .leptos_routes_with_context(
@@ -27,7 +29,11 @@ async fn main() {
             routes,
             {
                 let repo = repo.clone();
-                move || provide_context(repo.clone())
+                let alert_repo = alert_repo.clone();
+                move || {
+                    provide_context(repo.clone());
+                    provide_context(alert_repo.clone());
+                }
             },
             {
                 let leptos_options = leptos_options.clone();

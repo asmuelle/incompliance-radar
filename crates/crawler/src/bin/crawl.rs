@@ -25,6 +25,7 @@ async fn main() {
     let repo = SqliteCaseRepository::connect(&database_url)
         .await
         .unwrap_or_else(|e| panic!("failed to connect to database at {database_url}: {e}"));
+    let alert_repo = repo.alert_repository();
     let provider =
         llm::provider_from_env().expect("failed to configure LLM provider (see .env.example)");
 
@@ -35,7 +36,7 @@ async fn main() {
 
     for source in &sources {
         tracing::info!(source = source.name(), "starting crawl");
-        match run_crawl(source.as_ref(), provider.as_ref(), &repo).await {
+        match run_crawl(source.as_ref(), provider.as_ref(), &repo, &alert_repo).await {
             Ok(summary) => tracing::info!(source = source.name(), ?summary, "crawl finished"),
             Err(err) => tracing::error!(source = source.name(), %err, "crawl failed"),
         }

@@ -5,9 +5,9 @@ SQLite-backed persistence (`crates/db`, seeded with fictional demo data), a
 live query panel against the configured LLM backend, an LLM-based extraction
 pipeline (`crates/extraction`), a crawler (`crates/crawler`) that pulls real
 press releases from the SEC and FCA and feeds them through extraction
-automatically, and search/filtering by industry, jurisdiction, violation
-type, and law firm/monitor. Alerting and trend analysis from
-[Product Concept](product-concept.md) are not built yet.
+automatically, search/filtering by industry, jurisdiction, violation type,
+and law firm/monitor, and global watch-rule alerts. Trend analysis from
+[Product Concept](product-concept.md) is not built yet.
 
 Rough next steps, roughly in dependency order:
 
@@ -29,8 +29,14 @@ Rough next steps, roughly in dependency order:
    client-side filtering of a fully-fetched list). No free-text search,
    date-range filtering, or pagination yet — revisit once there's a real
    backlog of cases to justify it.
-5. **Alerts** — user-scoped subscriptions notified on new filings/monitor
-   appointments/DPA conclusions for tracked industries or competitors.
+5. ~~**Alerts**~~ — done as **global** watch rules, not user-scoped (this app
+   has no auth/user system — see CLAUDE.md for that tradeoff).
+   `domain::WatchRule` (industry and/or company-name-substring criteria) +
+   `db::evaluate_case`, checked after every case persisted via manual
+   extraction or the crawler. `WatchRulesPanel`/`AlertsPanel` manage rules and
+   show/acknowledge triggered alerts. No actual notification delivery
+   (email/push) — in-app only. Revisit user-scoping if/when real
+   multi-user need emerges.
 6. **Trend/benchmark analysis** — aggregate statistics across tracked cases.
 7. **Routing** (`leptos_router`) — only once there's a second page to
    justify it.

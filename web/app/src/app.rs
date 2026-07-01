@@ -1,7 +1,11 @@
-use crate::server_fns::{ask_llm, extract_case, list_cases, CaseFilterQuery};
+use crate::server_fns::{
+    acknowledge_alert, ask_llm, create_watch_rule, delete_watch_rule, extract_case, list_alerts,
+    list_cases, list_watch_rules, CaseFilterQuery,
+};
 use domain::ComplianceCase;
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
+use uuid::Uuid;
 
 /// Known `ViolationType` display labels for the search filter dropdown.
 /// `Other(_)` variants (whatever a filing didn't map to a known type) aren't
@@ -55,6 +59,8 @@ pub fn App() -> impl IntoView {
             </header>
             <SearchPanel filter/>
             <CaseList extract_action filter/>
+            <AlertsPanel extract_action/>
+            <WatchRulesPanel/>
             <ExtractPanel extract_action/>
             <AskPanel/>
         </main>
@@ -230,6 +236,195 @@ fn ExtractPanel(
                 }}
             </div>
         </section>
+    }
+}
+
+#[component]
+fn AlertsPanel(
+    extract_action: Action<String, Result<Option<ComplianceCase>, ServerFnError>>,
+) -> impl IntoView {
+    let acknowledge_action = Action::new(|id: &Uuid| {
+        let id = *id;
+        async move { acknowledge_alert(id).await }
+    });
+
+    // Refetches when a newly-extracted case might have triggered new alerts,
+    // or when one gets acknowledged.
+    let alerts = Resource::new(
+        move || {
+            (
+                extract_action.version().get(),
+                acknowledge_action.version().get(),
+            )
+        },
+        |_| async move { list_alerts().await },
+    );
+
+    view! {
+        <section class="alerts-panel">
+            <h2>"Alerts"</h2>
+            <p class="hint">"Triggered automatically when a new case matches a watch rule below."</p>
+            <Suspense fallback=move || view! { <p>"Loading alerts..."</p> }>
+                {move || {
+                    alerts
+                        .get()
+                        .map(|result| match result {
+                            Ok(alerts) if alerts.is_empty() => {
+                                view! { <p>"No alerts yet."</p> }.into_any()
+                            }
+                            Ok(alerts) => view! {
+                                <ul class="alerts-panel__list">
+                                    {alerts.into_iter().map(alert_list_item(acknowledge_action)).collect_view()}
+                                </ul>
+                            }
+                                .into_any(),
+                            Err(err) => {
+                                view! { <p class="error">{format!("Failed to load alerts: {err}")}</p> }
+                                    .into_any()
+                            }
+                        })
+                }}
+            </Suspense>
+        </section>
+    }
+}
+
+fn alert_list_item(
+    acknowledge_action: Action<Uuid, Result<(), ServerFnError>>,
+) -> impl Fn(domain::Alert) -> AnyView {
+    move |alert: domain::Alert| {
+        let id = alert.id;
+        let item_class = if alert.acknowledged {
+            "alerts-panel__item--acknowledged"
+        } else {
+            ""
+        };
+
+        view! {
+            <li class=item_class>
+                {alert.message}
+                <span class="alerts-panel__timestamp">{alert.created_at.to_string()}</span>
+                {(!alert.acknowledged)
+                    .then(|| {
+                        view! {
+                            <button on:click=move |_| {
+                                acknowledge_action.dispatch(id);
+                            }>"Acknowledge"</button>
+                        }
+                    })}
+            </li>
+        }
+        .into_any()
+    }
+}
+
+#[component]
+fn WatchRulesPanel() -> impl IntoView {
+    let (label, set_label) = signal(String::new());
+    let (industry, set_industry) = signal(String::new());
+    let (company, set_company) = signal(String::new());
+
+    let create_action = Action::new(move |_: &()| {
+        let label = label.get_untracked();
+        let industry_value = industry.get_untracked();
+        let company_value = company.get_untracked();
+        let industry = (!industry_value.is_empty()).then_some(industry_value);
+        let company = (!company_value.is_empty()).then_some(company_value);
+        async move { create_watch_rule(label, industry, company).await }
+    });
+    let delete_action = Action::new(|id: &Uuid| {
+        let id = *id;
+        async move { delete_watch_rule(id).await }
+    });
+
+    let rules = Resource::new(
+        move || (create_action.version().get(), delete_action.version().get()),
+        |_| async move { list_watch_rules().await },
+    );
+
+    view! {
+        <section class="watch-rules-panel">
+            <h2>"Watch rules"</h2>
+            <p class="hint">
+                "Get alerted when a new case matches an industry and/or a company name (e.g. to track a competitor)."
+            </p>
+            <div class="watch-rules-panel__form">
+                <input
+                    type="text"
+                    placeholder="Label, e.g. \"Banking watch\""
+                    prop:value=move || label.get()
+                    on:input=move |ev| set_label.set(event_target_value(&ev))
+                />
+                <input
+                    type="text"
+                    placeholder="Industry (optional)"
+                    prop:value=move || industry.get()
+                    on:input=move |ev| set_industry.set(event_target_value(&ev))
+                />
+                <input
+                    type="text"
+                    placeholder="Company name contains (optional)"
+                    prop:value=move || company.get()
+                    on:input=move |ev| set_company.set(event_target_value(&ev))
+                />
+                <button on:click=move |_| {
+                    create_action.dispatch(());
+                    set_label.set(String::new());
+                    set_industry.set(String::new());
+                    set_company.set(String::new());
+                }>"Add rule"</button>
+            </div>
+            <Suspense fallback=move || view! { <p>"Loading watch rules..."</p> }>
+                {move || {
+                    rules
+                        .get()
+                        .map(|result| match result {
+                            Ok(rules) if rules.is_empty() => {
+                                view! { <p>"No watch rules yet."</p> }.into_any()
+                            }
+                            Ok(rules) => view! {
+                                <ul class="watch-rules-panel__list">
+                                    {rules.into_iter().map(watch_rule_list_item(delete_action)).collect_view()}
+                                </ul>
+                            }
+                                .into_any(),
+                            Err(err) => {
+                                view! { <p class="error">{format!("Failed to load watch rules: {err}")}</p> }
+                                    .into_any()
+                            }
+                        })
+                }}
+            </Suspense>
+        </section>
+    }
+}
+
+fn watch_rule_list_item(
+    delete_action: Action<Uuid, Result<(), ServerFnError>>,
+) -> impl Fn(domain::WatchRule) -> AnyView {
+    move |rule: domain::WatchRule| {
+        let id = rule.id;
+        let criteria = [
+            rule.industry.as_ref().map(|i| format!("industry: {i}")),
+            rule.company_name_contains
+                .as_ref()
+                .map(|c| format!("company contains: {c}")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(", ");
+
+        view! {
+            <li>
+                <strong>{rule.label}</strong>
+                {(!criteria.is_empty()).then(|| format!(" — {criteria}"))}
+                <button on:click=move |_| {
+                    delete_action.dispatch(id);
+                }>"Remove"</button>
+            </li>
+        }
+        .into_any()
     }
 }
 

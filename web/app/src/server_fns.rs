@@ -1,4 +1,4 @@
-use domain::ComplianceCase;
+use domain::{Alert, ComplianceCase, WatchRule};
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -68,5 +68,74 @@ pub async fn extract_case(raw_text: String) -> Result<Option<ComplianceCase>, Se
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;
 
+    if let Err(err) = db::evaluate_case(&case, &*alert_repo_context()?).await {
+        // A watch-rule match failing to record shouldn't fail the extraction
+        // itself — the case is already safely persisted at this point.
+        leptos::logging::error!("failed to evaluate watch rules for extracted case: {err}");
+    }
+
     Ok(Some(case))
+}
+
+// Plain top-level fn, not a `#[server]` body — the macro only strips
+// ssr-only *bodies* for the client build, so this needs its own gate or the
+// wasm build fails trying to resolve `db` (only an ssr-feature dependency).
+#[cfg(feature = "ssr")]
+fn alert_repo_context() -> Result<std::sync::Arc<dyn db::AlertRepository>, ServerFnError> {
+    use_context::<std::sync::Arc<dyn db::AlertRepository>>()
+        .ok_or_else(|| ServerFnError::new("alert repository not available"))
+}
+
+/// Watch rules the operator has configured — see `domain::WatchRule` for
+/// match semantics. Global, not per-user: this app has no auth/user system.
+#[server(endpoint = "/list_watch_rules")]
+pub async fn list_watch_rules() -> Result<Vec<WatchRule>, ServerFnError> {
+    alert_repo_context()?
+        .list_rules()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server(endpoint = "/create_watch_rule")]
+pub async fn create_watch_rule(
+    label: String,
+    industry: Option<String>,
+    company_name_contains: Option<String>,
+) -> Result<WatchRule, ServerFnError> {
+    let rule = WatchRule::new(
+        label,
+        industry,
+        company_name_contains,
+        chrono::Utc::now().naive_utc(),
+    );
+    alert_repo_context()?
+        .create_rule(&rule)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    Ok(rule)
+}
+
+#[server(endpoint = "/delete_watch_rule")]
+pub async fn delete_watch_rule(id: uuid::Uuid) -> Result<(), ServerFnError> {
+    alert_repo_context()?
+        .delete_rule(id)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+/// Alerts already triggered by past matches, newest first.
+#[server(endpoint = "/list_alerts")]
+pub async fn list_alerts() -> Result<Vec<Alert>, ServerFnError> {
+    alert_repo_context()?
+        .list_alerts()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server(endpoint = "/acknowledge_alert")]
+pub async fn acknowledge_alert(id: uuid::Uuid) -> Result<(), ServerFnError> {
+    alert_repo_context()?
+        .acknowledge_alert(id)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
 }

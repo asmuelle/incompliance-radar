@@ -89,6 +89,48 @@ body {
   margin-top: 2rem;
 }
 
+.alerts-panel,
+.watch-rules-panel {
+  margin-top: 2rem;
+}
+
+.alerts-panel__list,
+.watch-rules-panel__list {
+  list-style: none;
+  padding: 0;
+}
+
+.alerts-panel__list li,
+.watch-rules-panel__list li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.alerts-panel__item--acknowledged {
+  opacity: 0.5;
+}
+
+.alerts-panel__timestamp {
+  color: rgba(232, 234, 240, 0.6);
+  font-size: 0.85rem;
+}
+
+.watch-rules-panel__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.watch-rules-panel__form input {
+  font-family: inherit;
+  padding: 0.4rem;
+  flex: 1 1 10rem;
+}
+
 .error {
   color: #ff6b6b;
 }
