@@ -4,9 +4,11 @@
 //! implementation today.
 
 mod error;
+mod filter;
 mod sqlite;
 
 pub use error::RepositoryError;
+pub use filter::CaseFilter;
 pub use sqlite::SqliteCaseRepository;
 
 use async_trait::async_trait;
@@ -20,4 +22,7 @@ pub trait CaseRepository: Send + Sync {
     /// Inserts a new case or replaces the existing one with the same id.
     async fn upsert(&self, case: &ComplianceCase) -> Result<(), RepositoryError>;
     async fn delete(&self, id: Uuid) -> Result<(), RepositoryError>;
+    /// Cases matching every criterion set in `filter` (AND). An empty filter
+    /// behaves like `list()`.
+    async fn search(&self, filter: &CaseFilter) -> Result<Vec<ComplianceCase>, RepositoryError>;
 }

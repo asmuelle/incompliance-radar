@@ -29,6 +29,43 @@ body {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.resolution-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+  color: rgba(232, 234, 240, 0.75);
+}
+
+.resolution-list li {
+  padding: 0.15rem 0;
+  border-bottom: none;
+}
+
+.search-panel {
+  margin-bottom: 1.5rem;
+}
+
+.search-panel__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.search-panel__fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  flex: 1 1 10rem;
+}
+
+.search-panel__fields input,
+.search-panel__fields select {
+  font-family: inherit;
+  padding: 0.4rem;
+}
+
 .ask-panel textarea,
 .extract-panel textarea {
   width: 100%;

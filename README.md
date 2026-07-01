@@ -15,9 +15,10 @@ Project docs: **[asmuelle.github.io/incompliance-radar](https://asmuelle.github.
 
 Early-stage scaffold: a working full-stack app with SQLite-backed persistence
 (seeded with fictional demo data on first run), a live LLM query panel, an
-LLM-based extraction pipeline, and a crawler that pulls real press releases
-from the SEC and FCA and feeds them through it automatically. Search/
-filtering UI and alerting described in `spec.md` are not built yet. See
+LLM-based extraction pipeline, a crawler that pulls real press releases from
+the SEC and FCA and feeds them through it automatically, and search/filtering
+by industry, jurisdiction, violation type, and law firm/monitor. Alerting and
+trend analysis described in `spec.md` are not built yet. See
 [`CLAUDE.md`](CLAUDE.md) for the current architecture and what's next.
 
 ## Getting started

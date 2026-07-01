@@ -88,12 +88,25 @@ backend is configured.
 
 ## Persistence
 
-`crates/db` defines `CaseRepository` (`list`/`get`/`upsert`/`delete`) and the
-only implementation, `SqliteCaseRepository`. Each case is stored as a JSON
-blob (the full `domain::ComplianceCase`, including nested resolutions/
+`crates/db` defines `CaseRepository` (`list`/`get`/`upsert`/`delete`/`search`)
+and the only implementation, `SqliteCaseRepository`. Each case is stored as a
+JSON blob (the full `domain::ComplianceCase`, including nested resolutions/
 monitors/sanctions) alongside a few indexed columns — see
 `crates/db/migrations/0001_create_compliance_cases.sql` for why the schema
 isn't normalized further yet.
+
+`search(filter: &CaseFilter)` (`industry`/`jurisdiction`/`violation_type`/
+`monitor_firm`, all optional, ANDed) is a **hybrid** implementation, not pure
+SQL: `industry`/`jurisdiction` are indexed columns and get pushed into the
+`WHERE` clause (case-insensitive via `COLLATE NOCASE`); `violation_type` and
+`monitor_firm` live inside each case's serialized `resolutions` JSON, not
+their own columns, so those two are filtered in Rust after deserializing the
+(already industry/jurisdiction-narrowed) SQL result set. This still counts as
+"server-side search" — the client calls one `search`/`list_cases` and gets
+back pre-filtered results, it never fetches everything and filters
+client-side. Revisit only if `violation_type`/`monitor_firm` filtering needs
+to scale past an in-memory scan (add real columns or a junction table, or use
+SQLite's `json_each`).
 
 `web/server/src/main.rs` connects (creating the SQLite file and running
 migrations if needed), seeds the fictional demo cases from `app::seed` only
@@ -213,6 +226,28 @@ periodically yourself, e.g. via cron:
 0 */6 * * * cd /path/to/incompliance-radar && DATABASE_URL=sqlite://incompliance-radar.db LLM_BACKEND=ollama ./target/release/crawl >> crawl.log 2>&1
 ```
 
+## Search and filtering
+
+`list_cases` (`web/app/src/server_fns.rs`) takes a `CaseFilterQuery` (plain
+`Option<String>` fields: `industry`, `jurisdiction`, `violation_type`,
+`monitor_firm`) — a wasm-safe DTO, not `db::CaseFilter` itself, converted to
+it inside the server-only body. An all-`None` filter matches everything (same
+as the old no-argument `list_cases`).
+
+`SearchPanel` (`web/app/src/app.rs`) holds one `RwSignal<CaseFilterQuery>`,
+shared with `CaseList`, whose `Resource` source is `(extract_action.version(),
+filter.get())` — it refetches on either a completed extraction or a filter
+change. The violation-type filter is a fixed dropdown
+(`VIOLATION_TYPE_OPTIONS`) rather than free text, since it's meant to match
+`domain::ViolationType`'s known variants exactly; industry/jurisdiction/
+monitor-firm stay free-text inputs since the underlying data is free text too.
+
+`domain::ViolationType`, `ResolutionKind`, and `ResolutionStatus` all have
+`Display` impls now (added alongside this feature, matching the existing
+`Regulator` one) — used both for the search match logic in
+`db::sqlite::matches_case` and for rendering resolution details in
+`case_list_item`/`resolution_list_item`.
+
 ## Commands
 
 ```bash
@@ -241,13 +276,13 @@ section above) or OFAC connector yet. Nothing is actually scheduled: the
 `crawl` binary must be invoked periodically by something external (cron,
 systemd timer, ...).
 
-There is no search/filtering UI yet, even though the schema indexes
-`industry`/`jurisdiction` for it. Add query methods to `CaseRepository` as
-real filter requirements emerge, rather than fetching everything via `list()`
-and filtering client-side.
-
 There is no routing (`leptos_router`) yet — the app is a single page. Add it
 when there's a second page to justify it (YAGNI).
+
+Search only covers the four fields in `CaseFilter`. There's no free-text
+search across obligations/sanctions descriptions, no date-range filtering,
+and no pagination — fine at today's scale (a handful of cases), revisit once
+the crawler has been running long enough to accumulate a real backlog.
 
 ## Conventions
 

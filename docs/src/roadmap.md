@@ -3,10 +3,11 @@
 Current state is a working full-stack scaffold: SSR + WASM hydration,
 SQLite-backed persistence (`crates/db`, seeded with fictional demo data), a
 live query panel against the configured LLM backend, an LLM-based extraction
-pipeline (`crates/extraction`), and a crawler (`crates/crawler`) that pulls
-real press releases from the SEC and FCA and feeds them through extraction
-automatically. None of the product-defining features from
-[Product Concept](product-concept.md) are built yet.
+pipeline (`crates/extraction`), a crawler (`crates/crawler`) that pulls real
+press releases from the SEC and FCA and feeds them through extraction
+automatically, and search/filtering by industry, jurisdiction, violation
+type, and law firm/monitor. Alerting and trend analysis from
+[Product Concept](product-concept.md) are not built yet.
 
 Rough next steps, roughly in dependency order:
 
@@ -22,9 +23,12 @@ Rough next steps, roughly in dependency order:
    connector (bot-blocked, see CLAUDE.md) or OFAC connector yet. Nothing
    schedules the `crawl` binary itself — that's on the operator (cron,
    systemd timer, ...).
-4. **Search and filtering UI** — by industry, jurisdiction, violation type,
-   law firm. Extend `CaseRepository` with query methods rather than filtering
-   `list()` results client-side.
+4. ~~**Search and filtering UI**~~ — done: `SearchPanel`/`CaseList`
+   (`web/app/src/app.rs`) filter by industry, jurisdiction, violation type,
+   and law firm/monitor via `CaseRepository::search`, server-side (not
+   client-side filtering of a fully-fetched list). No free-text search,
+   date-range filtering, or pagination yet — revisit once there's a real
+   backlog of cases to justify it.
 5. **Alerts** — user-scoped subscriptions notified on new filings/monitor
    appointments/DPA conclusions for tracked industries or competitors.
 6. **Trend/benchmark analysis** — aggregate statistics across tracked cases.

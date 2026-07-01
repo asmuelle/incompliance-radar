@@ -42,11 +42,18 @@ server-only dependencies.
 ## Persistence
 
 `crates/db` stores each `ComplianceCase` as a JSON blob in SQLite, alongside
-indexed `industry`/`jurisdiction`/`company_name` columns for future
-filtering. `web/server` connects and runs migrations at startup, seeding the
-fictional demo cases only if the database is empty, then makes the
-repository available to server functions through Leptos context
+indexed `industry`/`jurisdiction`/`company_name` columns used for filtering.
+`web/server` connects and runs migrations at startup, seeding the fictional
+demo cases only if the database is empty, then makes the repository
+available to server functions through Leptos context
 (`leptos_routes_with_context` + `provide_context`).
+
+`CaseRepository::search` combines a SQL `WHERE` on the indexed
+industry/jurisdiction columns with an in-memory filter (over that
+already-narrowed result set) for violation type and monitor firm, which live
+inside the JSON blob rather than their own columns. Still server-side search
+from the client's perspective — see [Search and filtering](#search-and-filtering)
+below.
 
 ## NLP extraction
 
@@ -70,6 +77,13 @@ selector). There's deliberately no DoJ connector — `justice.gov` blocks
 automated clients with a bot-management challenge, and defeating that isn't
 something this project does. The `crawl` binary runs one pass and exits; an
 external scheduler (cron, a systemd timer) invokes it periodically.
+
+## Search and filtering
+
+The UI's `SearchPanel` filters by industry, jurisdiction, violation type, and
+law firm/monitor, calling `list_cases` with a `CaseFilterQuery` (an all-`None`
+filter matches everything). `CaseList`'s data resource refetches whenever the
+filter changes or an extraction completes.
 
 ## Data flow (current state)
 
