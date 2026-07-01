@@ -30,6 +30,9 @@ crates/
   extraction/ LLM-based structured extraction of a `ComplianceCase` from raw
               filing text (schema-constrained prompt + JSON parse +
               validation). Depends on `llm` and `domain`; server-only.
+  crawler/    Scheduled fetch jobs (`FilingSource` trait + SEC/FCA
+              connectors) feeding `extraction`. Standalone `crawl` binary,
+              not part of the web app. Server-only.
 web/
   app/        Shared UI: the `App` component, `shell()` HTML document,
               `#[server]` functions (server_fns.rs), and fictional seed data
@@ -110,14 +113,37 @@ already supports it, only a caller is missing.
 
 ## NLP extraction
 
-`crates/extraction::extract_case(provider, raw_text)` turns raw filing text
-into a `domain::ComplianceCase` using any `llm::LlmProvider`:
+`crates/extraction::extract_case(provider, raw_text) -> Result<Option<ComplianceCase>, ExtractionError>`
+turns raw filing text into a `domain::ComplianceCase` using any
+`llm::LlmProvider`:
 
-1. `prompt::SYSTEM_PROMPT` instructs the model to return a single JSON object
-   with an exact field shape (see the prompt itself for the schema).
-2. `extract_json_object` defensively strips prose/markdown fences models
+1. `prompt::SYSTEM_PROMPT` first asks the model to decide whether the text is
+   actually about an enforcement action/DPA/NPA/monitorship at all; if not,
+   it returns `{"not_applicable": true}` and `extract_case` returns `Ok(None)`
+   — a normal, expected outcome (most items in a general regulator news feed
+   aren't enforcement actions), not an error. This exists because the naive
+   version — requiring every field, always — broke the first time it was fed
+   real (non-enforcement) FCA news items: the model correctly followed
+   "use null for unclear fields", which failed to deserialize into
+   `ParsedCase`'s required `String` fields. Don't remove the escape hatch
+   without re-testing against a real, mixed-content feed.
+
+   Also seen live: the model sometimes ignores the standalone-sentinel
+   instruction and instead returns a **full** case-shaped object with the
+   literal string `"not_applicable"` stuffed into `company_name`. Because
+   that's a non-empty string, it silently passed validation and produced a
+   garbage row (`company_name: "not_applicable"`) until
+   `parsed::looks_like_not_applicable_marker` was added to catch it — see
+   `parsed.rs`'s `company_name_literally_not_applicable_is_treated_as_not_a_case`
+   test. If you see garbage rows again, check the actual model response
+   (`response.text` before parsing) rather than assuming the schema/validation
+   is wrong; models don't reliably follow "always respond in shape A or B,
+   never a hybrid."
+2. Otherwise, it returns a single JSON object with an exact field shape (see
+   the prompt itself for the schema).
+3. `extract_json_object` defensively strips prose/markdown fences models
    sometimes add despite instructions not to, taking the outermost `{...}`.
-3. `parsed::ParsedCase` (a plain-string DTO, deliberately looser than
+4. `parsed::ParsedCase` (a plain-string DTO, deliberately looser than
    `domain`'s types) deserializes the JSON, then `try_into_domain` validates
    it at the boundary: known enum values (regulator, resolution kind,
    violation type) map to their `domain` variant with an `Other(_)` fallback
@@ -129,12 +155,63 @@ into a `domain::ComplianceCase` using any `llm::LlmProvider`:
 
 The `extract_case` server function (`web/app/src/server_fns.rs`) wires it
 end-to-end: raw text → `extraction::extract_case` → `CaseRepository::upsert`
-→ returned to the UI, which bumps `Action::version()` to refetch the case
-list (see `ExtractPanel`/`CaseList` in `web/app/src/app.rs`).
+(skipped on `None`) → returned to the UI, which bumps `Action::version()` to
+refetch the case list (see `ExtractPanel`/`CaseList` in
+`web/app/src/app.rs`).
 
-This is the extraction *mechanism*; there's no crawler feeding it real
-filings yet (paste text manually via the UI, or call `/api/extract_case`
-directly) — see Roadmap in the docs site.
+`MAX_RESPONSE_TOKENS` (4096) in `lib.rs` is deliberately generous — a real
+FCA press release truncated at the previous default of 1024 (some local
+models emit reasoning before the JSON), producing a response with no closing
+brace at all. Don't lower it without re-testing against real filing text.
+
+## Crawler
+
+`crates/crawler` feeds real filings into `extraction::extract_case`
+automatically instead of requiring manual paste. `FilingSource` is the
+per-regulator trait (`fetch_recent() -> Vec<RawFiling>`); `run_crawl(source,
+provider, repo)` fetches, dedupes against URLs already recorded as a
+resolution's `source` on an existing case (an O(n) full-table scan via
+`repo.list()` — fine at today's scale, revisit with a dedicated indexed query
+if the case count grows large), and calls `extraction::extract_case` +
+`CaseRepository::upsert` for the rest. One filing failing extraction or
+persistence is logged and counted, not fatal to the run.
+
+Two connectors exist today, both verified against the live sites (not just
+written from guessed HTML structure):
+
+- `sources::sec::SecPressReleases` — SEC's press release RSS feed
+  (`sec.gov/news/pressreleases.rss`) + per-page `div.field--name-body`
+  (Drupal). SEC's fair-access policy requires a descriptive `User-Agent`,
+  which `SecPressReleases::new` takes as a parameter — **customize it for
+  your deployment**, don't ship the default verbatim. SEC also actively rate
+  limits (~1 req/sec is safe; going faster gets you a 403 with `Request Rate
+  Threshold Exceeded`, which the crawler detects via `is_rate_limited` and
+  stops that source's fetch early rather than burning through the rest of
+  the batch on failures).
+- `sources::fca::FcaNews` — FCA's general news feed (there's no
+  press-releases-only feed; `/news/press-releases/rss.xml` 404s) + per-page
+  `article` selector. Expect a lot of `Ok(None)` from non-enforcement items
+  (speeches, consultations, blog posts) mixed into this feed.
+
+**The DoJ has no connector** — `justice.gov` sits behind an Akamai
+bot-management interstitial (a JS proof-of-work challenge) that blocks plain
+HTTP clients. Don't try to solve/bypass that challenge; if DoJ coverage is
+needed, look for an official API/data-sharing arrangement instead of
+defeating their anti-automation controls.
+
+Both connectors cap fetches at `MAX_ITEMS` (10) per run, both to bound LLM
+call volume and to avoid re-fetching a regulator's entire feed history every
+run — there's no `since` cursor, `run_crawl`'s URL-based dedup is what makes
+re-fetching the same window safe.
+
+The `crawl` binary (`crates/crawler/src/bin/crawl.rs`) runs one pass across
+all configured sources and exits — it is **not** a scheduler. Invoke it
+periodically yourself, e.g. via cron:
+
+```cron
+# every 6 hours
+0 */6 * * * cd /path/to/incompliance-radar && DATABASE_URL=sqlite://incompliance-radar.db LLM_BACKEND=ollama ./target/release/crawl >> crawl.log 2>&1
+```
 
 ## Commands
 
@@ -147,6 +224,7 @@ cargo check -p app --features ssr           # check server-side app compile
 cargo check -p frontend --target wasm32-unknown-unknown  # check wasm compile
 cargo fmt --all
 cargo clippy --workspace --exclude frontend -- -D warnings   # frontend needs --target wasm32-unknown-unknown for clippy
+cargo build -p crawler --bin crawl && ./target/debug/crawl   # one crawl pass, see Crawler section
 ```
 
 `cargo-leptos` and the `wasm32-unknown-unknown` target must be installed:
@@ -158,11 +236,10 @@ fails with a schema-version mismatch — `cargo install wasm-bindgen-cli
 
 ## Current known gaps (documented, not silently missing)
 
-There is no crawler yet — filing text has to be pasted in manually via the
-"Extract a case from filing text" panel (or `POST /api/extract_case`). The
-extraction *mechanism* (`crates/extraction`) exists; scheduled fetch jobs
-against DoJ/SEC/FCA/OFAC feeding it are the natural next step (see Roadmap in
-the docs site).
+The crawler covers SEC and FCA only — no DoJ (bot-blocked, see Crawler
+section above) or OFAC connector yet. Nothing is actually scheduled: the
+`crawl` binary must be invoked periodically by something external (cron,
+systemd timer, ...).
 
 There is no search/filtering UI yet, even though the schema indexes
 `industry`/`jurisdiction` for it. Add query methods to `CaseRepository` as

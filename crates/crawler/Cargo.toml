@@ -1,0 +1,23 @@
+[package]
+name = "crawler"
+version = "0.1.0"
+edition = "2021"
+description = "Scheduled fetch jobs against public regulator sources, feeding the extraction pipeline."
+
+[dependencies]
+domain = { path = "../domain" }
+llm = { path = "../llm" }
+db = { path = "../db" }
+extraction = { path = "../extraction" }
+async-trait = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+rss = "2"
+scraper = "0.21"
+chrono = { workspace = true }
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

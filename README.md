@@ -14,11 +14,11 @@ Project docs: **[asmuelle.github.io/incompliance-radar](https://asmuelle.github.
 ## Status
 
 Early-stage scaffold: a working full-stack app with SQLite-backed persistence
-(seeded with fictional demo data on first run), a live LLM query panel, and
-an LLM-based extraction pipeline that turns pasted filing text into a
-structured, persisted case. The crawler, search/filtering UI, and alerting
-described in `spec.md` are not built yet. See [`CLAUDE.md`](CLAUDE.md) for
-the current architecture and what's next.
+(seeded with fictional demo data on first run), a live LLM query panel, an
+LLM-based extraction pipeline, and a crawler that pulls real press releases
+from the SEC and FCA and feeds them through it automatically. Search/
+filtering UI and alerting described in `spec.md` are not built yet. See
+[`CLAUDE.md`](CLAUDE.md) for the current architecture and what's next.
 
 ## Getting started
 
@@ -47,6 +47,19 @@ LLM_BACKEND=anthropic
 ANTHROPIC_API_KEY=sk-...
 ```
 
+## Running the crawler
+
+One pass across the configured regulator sources (SEC, FCA), extracting and
+persisting any enforcement actions found:
+
+```bash
+cargo run -p crawler --bin crawl
+```
+
+Not scheduled — invoke it periodically yourself (cron, a systemd timer, ...).
+See [`CLAUDE.md`](CLAUDE.md) for connector details, rate-limit behavior, and
+why there's no DoJ connector.
+
 ## Workspace layout
 
 ```
@@ -54,6 +67,7 @@ crates/domain/   Core compliance domain types (wasm-safe)
 crates/llm/      LLM provider abstraction (Ollama + Anthropic)
 crates/db/       Persistence (CaseRepository trait + SQLite)
 crates/extraction/  LLM-based structured extraction from raw filing text
+crates/crawler/  Scheduled fetch jobs (SEC + FCA) feeding extraction
 web/app/         Shared Leptos UI + server functions
 web/frontend/    Wasm hydration entry point
 web/server/      Axum server binary

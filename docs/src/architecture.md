@@ -14,6 +14,8 @@ crates/
               server-only.
   extraction/ LLM-based structured extraction of a ComplianceCase from raw
               filing text, server-only.
+  crawler/    Scheduled fetch jobs (FilingSource trait + SEC/FCA connectors)
+              feeding extraction. Standalone `crawl` binary, server-only.
 web/
   app/        Shared Leptos UI + server functions + fictional seed data.
   frontend/   Wasm hydration entry point.
@@ -56,20 +58,37 @@ sanction amounts, or an unrecognized status are rejected rather than
 guessed). The "Extract a case from filing text" panel in the UI calls this
 end-to-end and persists the result via `CaseRepository::upsert`.
 
+## Crawler
+
+`crates/crawler` fetches real filings so extraction doesn't rely solely on
+manual paste. `FilingSource` is the per-regulator trait; `run_crawl` fetches,
+dedupes by URL against sources already recorded on existing cases, and feeds
+new filings through `extraction::extract_case` + `CaseRepository::upsert`.
+Two connectors exist, both verified against the live sites: SEC (RSS feed +
+Drupal body selector, rate-limit aware) and FCA (general news RSS + article
+selector). There's deliberately no DoJ connector — `justice.gov` blocks
+automated clients with a bot-management challenge, and defeating that isn't
+something this project does. The `crawl` binary runs one pass and exits; an
+external scheduler (cron, a systemd timer) invokes it periodically.
+
 ## Data flow (current state)
 
+Two ways a filing reaches `extraction::extract_case`:
+
 ```
-Browser (WASM) --hydrate--> App component
-                                |
-                        #[server] functions
-                                |
-                    Axum server (native binary)
-                    /            |              \
-    db::CaseRepository   llm::provider_from_env()   extraction::extract_case
-       (SQLite)                  |                  (schema prompt + validate)
-                        Ollama (local) or                 |
-                        Anthropic (frontier)     --> db::CaseRepository::upsert
+Browser (WASM) --hydrate--> App component --#[server] fns--> Axum server
+SEC/FCA RSS + pages --crawler::run_crawl-------------------> Axum process
 ```
 
-There is no crawler yet feeding real filings into extraction — see
-[Roadmap](roadmap.md).
+Both converge on the same pipeline:
+
+```
+raw filing text --> extraction::extract_case (schema prompt + validate)
+                           |                        |
+                  llm::provider_from_env()   db::CaseRepository::upsert
+                           |                        |
+              Ollama (local) or                 SQLite
+              Anthropic (frontier)
+```
+
+See [Roadmap](roadmap.md) for what's next.

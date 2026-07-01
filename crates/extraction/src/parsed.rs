@@ -6,18 +6,23 @@ use domain::{
 use serde::Deserialize;
 
 /// Mirrors the JSON shape described in `prompt::SYSTEM_PROMPT`. Deliberately
-/// looser than the `domain` types it converts into — fields are plain
-/// strings here, and `try_into_domain` is where untrusted model output gets
-/// validated against `domain`'s actual invariants (see rules/common/security.md:
-/// "parse, don't validate" at the system boundary).
+/// looser than the `domain` types it converts into — every field is
+/// `Option`, even the two (`company_name`, `status`) the prompt asks the
+/// model never to leave null, because live testing showed it sometimes does
+/// anyway. `try_into_domain` is where untrusted model output gets validated
+/// against `domain`'s actual invariants (see rules/common/security.md: "parse,
+/// don't validate" at the system boundary) — a null we can default
+/// sensibly (industry, jurisdiction, regulator, resolution_kind) becomes a
+/// default; a null we can't (company_name, status) becomes a clear
+/// `ExtractionError::Validation`, not a generic `serde` deserialize crash.
 #[derive(Debug, Deserialize)]
 pub(crate) struct ParsedCase {
-    company_name: String,
-    industry: String,
-    jurisdiction: String,
-    regulator: String,
-    resolution_kind: String,
-    status: String,
+    company_name: Option<String>,
+    industry: Option<String>,
+    jurisdiction: Option<String>,
+    regulator: Option<String>,
+    resolution_kind: Option<String>,
+    status: Option<String>,
     signed_on: Option<String>,
     term_months: Option<u32>,
     monitor: Option<ParsedMonitor>,
@@ -45,21 +50,69 @@ pub(crate) struct ParsedSanction {
     description: Option<String>,
 }
 
-impl ParsedCase {
-    pub(crate) fn try_into_domain(self) -> Result<ComplianceCase, ExtractionError> {
-        if self.company_name.trim().is_empty() {
-            return Err(ExtractionError::Validation(
-                "company_name must not be empty".into(),
-            ));
-        }
+/// Used when the model doesn't identify a secondary field (industry,
+/// jurisdiction, regulator, resolution kind) — unlike `company_name` and
+/// `status`, none of these are essential to what makes this a tracked case,
+/// so a placeholder beats rejecting the whole extraction over it.
+const UNKNOWN: &str = "Unknown";
 
-        let company = Company::new(self.company_name, self.industry, self.jurisdiction);
+/// Seen live: instead of returning the standalone `{"not_applicable": true}`
+/// sentinel, the model sometimes emits a full case-shaped object but writes
+/// the literal field name back as `company_name`'s value. Any of these,
+/// trimmed and lowercased, is treated the same as the proper sentinel.
+const NOT_APPLICABLE_MARKERS: &[&str] = &["not_applicable", "not applicable", "n/a"];
+
+fn looks_like_not_applicable_marker(value: &str) -> bool {
+    NOT_APPLICABLE_MARKERS.contains(&value.trim().to_lowercase().as_str())
+}
+
+impl ParsedCase {
+    /// `Ok(None)` covers both the proper `not_applicable` sentinel (handled
+    /// one level up, before this is even called) and this same intent
+    /// expressed the "wrong" way, inside an otherwise full object — see
+    /// `looks_like_not_applicable_marker`.
+    pub(crate) fn try_into_domain(self) -> Result<Option<ComplianceCase>, ExtractionError> {
+        let company_name = self
+            .company_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                ExtractionError::Validation(
+                    "company_name is required but was missing or empty".into(),
+                )
+            })?;
+
+        if looks_like_not_applicable_marker(company_name) {
+            return Ok(None);
+        }
+        let company_name = company_name.to_string();
+
+        let status = self
+            .status
+            .as_deref()
+            .ok_or_else(|| ExtractionError::Validation("status is required but was missing".into()))
+            .and_then(parse_status)?;
+
+        let company = Company::new(
+            company_name,
+            self.industry.unwrap_or_else(|| UNKNOWN.to_string()),
+            self.jurisdiction.unwrap_or_else(|| UNKNOWN.to_string()),
+        );
         let mut case = ComplianceCase::new(company);
 
         case.resolutions.push(Resolution {
-            regulator: parse_regulator(&self.regulator),
-            kind: parse_resolution_kind(&self.resolution_kind),
-            status: parse_status(&self.status)?,
+            regulator: self
+                .regulator
+                .as_deref()
+                .map(parse_regulator)
+                .unwrap_or(Regulator::Other(UNKNOWN.to_string())),
+            kind: self
+                .resolution_kind
+                .as_deref()
+                .map(parse_resolution_kind)
+                .unwrap_or(ResolutionKind::Other(UNKNOWN.to_string())),
+            status,
             signed_on: parse_date(self.signed_on.as_deref())?,
             term_months: self.term_months,
             monitor: self
@@ -76,7 +129,7 @@ impl ParsedCase {
             source: self.source,
         });
 
-        Ok(case)
+        Ok(Some(case))
     }
 }
 
@@ -197,7 +250,10 @@ mod tests {
     #[test]
     fn valid_json_converts_to_domain_case() {
         let parsed: ParsedCase = serde_json::from_str(valid_json()).unwrap();
-        let case = parsed.try_into_domain().unwrap();
+        let case = parsed
+            .try_into_domain()
+            .unwrap()
+            .expect("should be a real case");
 
         assert_eq!(case.company.name, "Acme Global Industries");
         assert_eq!(case.resolutions.len(), 1);
@@ -206,6 +262,18 @@ mod tests {
         assert_eq!(resolution.status, ResolutionStatus::Active);
         assert_eq!(resolution.violations, vec![ViolationType::Bribery]);
         assert_eq!(resolution.monitor.as_ref().unwrap().name, "Jane Doe");
+    }
+
+    #[test]
+    fn company_name_literally_not_applicable_is_treated_as_not_a_case() {
+        // Regression test: seen live against a real FCA speech transcript —
+        // the model returned a full case-shaped object (not the standalone
+        // `{"not_applicable": true}` sentinel) but wrote the sentinel word
+        // into `company_name` instead of a real name.
+        let json = valid_json().replace("\"Acme Global Industries\"", "\"not_applicable\"");
+        let parsed: ParsedCase = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.try_into_domain().unwrap(), None);
     }
 
     #[test]
@@ -265,6 +333,62 @@ mod tests {
     }
 
     #[test]
+    fn null_company_name_is_rejected() {
+        let json = valid_json().replace("\"Acme Global Industries\"", "null");
+        let parsed: ParsedCase = serde_json::from_str(&json).unwrap();
+
+        let err = parsed.try_into_domain().unwrap_err();
+
+        assert!(matches!(err, ExtractionError::Validation(_)));
+    }
+
+    #[test]
+    fn null_status_is_rejected() {
+        let json = valid_json().replace("\"Active\"", "null");
+        let parsed: ParsedCase = serde_json::from_str(&json).unwrap();
+
+        let err = parsed.try_into_domain().unwrap_err();
+
+        assert!(matches!(err, ExtractionError::Validation(_)));
+    }
+
+    #[test]
+    fn null_secondary_fields_fall_back_to_defaults_instead_of_failing() {
+        // Regression test: a real FCA press release made the model return
+        // `company_name`/`status` correctly but `null` for other "required"
+        // fields, which used to crash `serde_json::from_str` outright.
+        let json = r#"{
+            "company_name": "Acme",
+            "industry": null,
+            "jurisdiction": null,
+            "regulator": null,
+            "resolution_kind": null,
+            "status": "Active",
+            "signed_on": null,
+            "term_months": null,
+            "monitor": null,
+            "source": null
+        }"#;
+        let parsed: ParsedCase = serde_json::from_str(json).unwrap();
+
+        let case = parsed
+            .try_into_domain()
+            .unwrap()
+            .expect("should be a real case");
+
+        assert_eq!(case.company.industry, UNKNOWN);
+        assert_eq!(case.company.jurisdiction, UNKNOWN);
+        assert_eq!(
+            case.resolutions[0].regulator,
+            Regulator::Other(UNKNOWN.to_string())
+        );
+        assert_eq!(
+            case.resolutions[0].kind,
+            ResolutionKind::Other(UNKNOWN.to_string())
+        );
+    }
+
+    #[test]
     fn missing_optional_fields_default_to_empty() {
         let json = r#"{
             "company_name": "Acme",
@@ -280,7 +404,10 @@ mod tests {
         }"#;
         let parsed: ParsedCase = serde_json::from_str(json).unwrap();
 
-        let case = parsed.try_into_domain().unwrap();
+        let case = parsed
+            .try_into_domain()
+            .unwrap()
+            .expect("should be a real case");
 
         let resolution = &case.resolutions[0];
         assert!(resolution.violations.is_empty());

@@ -47,7 +47,7 @@ pub fn App() -> impl IntoView {
 
 #[component]
 fn CaseList(
-    extract_action: Action<String, Result<ComplianceCase, ServerFnError>>,
+    extract_action: Action<String, Result<Option<ComplianceCase>, ServerFnError>>,
 ) -> impl IntoView {
     // Refetches whenever `extract_action` completes, so a newly-extracted
     // case shows up without a manual page reload.
@@ -99,7 +99,7 @@ fn CaseList(
 
 #[component]
 fn ExtractPanel(
-    extract_action: Action<String, Result<ComplianceCase, ServerFnError>>,
+    extract_action: Action<String, Result<Option<ComplianceCase>, ServerFnError>>,
 ) -> impl IntoView {
     let (raw_text, set_raw_text) = signal(String::new());
 
@@ -119,8 +119,12 @@ fn ExtractPanel(
             }>"Extract & Save"</button>
             <div class="extract-panel__result">
                 {move || match extract_action.value().get() {
-                    Some(Ok(case)) => {
+                    Some(Ok(Some(case))) => {
                         format!("Saved \"{}\" with {} resolution(s).", case.company.name, case.resolutions.len())
+                    }
+                    Some(Ok(None)) => {
+                        "That text doesn't look like an enforcement action, DPA/NPA, or monitorship — nothing saved."
+                            .to_string()
                     }
                     Some(Err(err)) => format!("Error: {err}"),
                     None => String::new(),

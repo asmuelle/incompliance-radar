@@ -43,6 +43,11 @@ impl CompletionRequest {
         self.system = Some(system.into());
         self
     }
+
+    pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
+        self.max_tokens = max_tokens;
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
