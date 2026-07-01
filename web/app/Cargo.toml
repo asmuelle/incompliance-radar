@@ -17,6 +17,7 @@ chrono = { workspace = true }
 # never referenced from client-compiled code.
 llm = { path = "../../crates/llm", optional = true }
 db = { path = "../../crates/db", optional = true }
+extraction = { path = "../../crates/extraction", optional = true }
 
 [features]
 ssr = [
@@ -24,4 +25,5 @@ ssr = [
   "leptos_meta/ssr",
   "dep:llm",
   "dep:db",
+  "dep:extraction",
 ]

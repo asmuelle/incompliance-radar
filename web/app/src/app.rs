@@ -1,4 +1,5 @@
-use crate::server_fns::{ask_llm, list_cases};
+use crate::server_fns::{ask_llm, extract_case, list_cases};
+use domain::ComplianceCase;
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
 
@@ -24,6 +25,11 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 pub fn App() -> impl IntoView {
     provide_meta_context();
 
+    let extract_action = Action::new(|raw_text: &String| {
+        let raw_text = raw_text.to_owned();
+        async move { extract_case(raw_text).await }
+    });
+
     view! {
         <Stylesheet id="leptos" href="/pkg/incompliance-radar.css"/>
         <Title text="incomplianceRadar"/>
@@ -32,15 +38,23 @@ pub fn App() -> impl IntoView {
                 <h1>"incomplianceRadar"</h1>
                 <p>"Tracking global compliance monitorships, DPAs and NPAs."</p>
             </header>
-            <CaseList/>
+            <CaseList extract_action/>
+            <ExtractPanel extract_action/>
             <AskPanel/>
         </main>
     }
 }
 
 #[component]
-fn CaseList() -> impl IntoView {
-    let cases = Resource::new(|| (), |_| async move { list_cases().await });
+fn CaseList(
+    extract_action: Action<String, Result<ComplianceCase, ServerFnError>>,
+) -> impl IntoView {
+    // Refetches whenever `extract_action` completes, so a newly-extracted
+    // case shows up without a manual page reload.
+    let cases = Resource::new(
+        move || extract_action.version().get(),
+        |_| async move { list_cases().await },
+    );
 
     view! {
         <section class="case-list">
@@ -79,6 +93,39 @@ fn CaseList() -> impl IntoView {
                         })
                 }}
             </Suspense>
+        </section>
+    }
+}
+
+#[component]
+fn ExtractPanel(
+    extract_action: Action<String, Result<ComplianceCase, ServerFnError>>,
+) -> impl IntoView {
+    let (raw_text, set_raw_text) = signal(String::new());
+
+    view! {
+        <section class="extract-panel">
+            <h2>"Extract a case from filing text"</h2>
+            <p class="hint">
+                "Paste a press release or filing excerpt; the configured LLM extracts structured fields and saves the result to the case list above."
+            </p>
+            <textarea
+                prop:value=move || raw_text.get()
+                on:input=move |ev| set_raw_text.set(event_target_value(&ev))
+                placeholder="e.g. paste a DoJ press release announcing a deferred prosecution agreement..."
+            />
+            <button on:click=move |_| {
+                extract_action.dispatch(raw_text.get());
+            }>"Extract & Save"</button>
+            <div class="extract-panel__result">
+                {move || match extract_action.value().get() {
+                    Some(Ok(case)) => {
+                        format!("Saved \"{}\" with {} resolution(s).", case.company.name, case.resolutions.len())
+                    }
+                    Some(Err(err)) => format!("Error: {err}"),
+                    None => String::new(),
+                }}
+            </div>
         </section>
     }
 }

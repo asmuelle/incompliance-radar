@@ -27,6 +27,9 @@ crates/
               Server-only (uses reqwest/tokio); never a wasm target.
   db/         Persistence. `CaseRepository` trait + `SqliteCaseRepository`
               (sqlx). Server-only; never a wasm target.
+  extraction/ LLM-based structured extraction of a `ComplianceCase` from raw
+              filing text (schema-constrained prompt + JSON parse +
+              validation). Depends on `llm` and `domain`; server-only.
 web/
   app/        Shared UI: the `App` component, `shell()` HTML document,
               `#[server]` functions (server_fns.rs), and fictional seed data
@@ -45,18 +48,19 @@ web/
 
 cargo-leptos needs one crate compiled for wasm32 (client) and one compiled
 natively (server), from a *shared* UI crate. Server-only dependencies (axum,
-tokio, sqlx, `llm`, `db`) must never leak into a crate that gets built for
-wasm32-unknown-unknown, or the wasm build breaks. Concretely:
+tokio, sqlx, `llm`, `db`, `extraction`) must never leak into a crate that
+gets built for wasm32-unknown-unknown, or the wasm build breaks. Concretely:
 
 - `crates/domain` has zero ssr-only dependencies — it's imported by all of
   `app`, `frontend`, and `server`, native and wasm alike.
-- `web/app`'s `llm` and `db` dependencies are `optional = true`, gated behind
-  the `ssr` feature. `server_fns.rs` calls them via **fully-qualified paths**
-  (`llm::provider_from_env()`, `db::CaseRepository`) instead of a top-level
-  `use llm::...;` / `use db::...;`, because the `#[server]` macro only
-  compiles the function *body* under the `ssr` feature — a top-level `use`
-  statement is a plain module item and would break the wasm build if the
-  crate weren't available there.
+- `web/app`'s `llm`, `db`, and `extraction` dependencies are `optional =
+  true`, gated behind the `ssr` feature. `server_fns.rs` calls them via
+  **fully-qualified paths** (`llm::provider_from_env()`, `db::CaseRepository`,
+  `extraction::extract_case`) instead of a top-level `use llm::...;` /
+  `use db::...;` / `use extraction::...;`, because the `#[server]` macro
+  only compiles the function *body* under the `ssr` feature — a top-level
+  `use` statement is a plain module item and would break the wasm build if
+  the crate weren't available there.
 - Don't add axum/tokio/sqlx/reqwest as unconditional dependencies of
   `web/app` — always gate them behind `ssr` the same way.
 
@@ -104,6 +108,34 @@ To add a write path (crawler ingestion, manual curation UI, etc.), call
 `CaseRepository::upsert` from a new server function the same way — the trait
 already supports it, only a caller is missing.
 
+## NLP extraction
+
+`crates/extraction::extract_case(provider, raw_text)` turns raw filing text
+into a `domain::ComplianceCase` using any `llm::LlmProvider`:
+
+1. `prompt::SYSTEM_PROMPT` instructs the model to return a single JSON object
+   with an exact field shape (see the prompt itself for the schema).
+2. `extract_json_object` defensively strips prose/markdown fences models
+   sometimes add despite instructions not to, taking the outermost `{...}`.
+3. `parsed::ParsedCase` (a plain-string DTO, deliberately looser than
+   `domain`'s types) deserializes the JSON, then `try_into_domain` validates
+   it at the boundary: known enum values (regulator, resolution kind,
+   violation type) map to their `domain` variant with an `Other(_)` fallback
+   for anything unrecognized; `status` has **no** fallback (`domain::
+   ResolutionStatus` has no `Other` variant) and is rejected if it isn't
+   exactly one of active/completed/terminated/breached; dates must parse as
+   `YYYY-MM-DD`; sanction amounts must be non-negative. See
+   `crates/extraction/src/parsed.rs` tests for the exact validation matrix.
+
+The `extract_case` server function (`web/app/src/server_fns.rs`) wires it
+end-to-end: raw text → `extraction::extract_case` → `CaseRepository::upsert`
+→ returned to the UI, which bumps `Action::version()` to refetch the case
+list (see `ExtractPanel`/`CaseList` in `web/app/src/app.rs`).
+
+This is the extraction *mechanism*; there's no crawler feeding it real
+filings yet (paste text manually via the UI, or call `/api/extract_case`
+directly) — see Roadmap in the docs site.
+
 ## Commands
 
 ```bash
@@ -126,11 +158,11 @@ fails with a schema-version mismatch — `cargo install wasm-bindgen-cli
 
 ## Current known gaps (documented, not silently missing)
 
-There is no crawler or NLP extraction pipeline yet — the database only ever
-contains the fictional demo seed data (or whatever's manually inserted via
-`CaseRepository::upsert`). Building the real ingestion pipeline from
-`spec.md` is the natural next step; feed it through the same
-`CaseRepository` trait rather than a new storage path.
+There is no crawler yet — filing text has to be pasted in manually via the
+"Extract a case from filing text" panel (or `POST /api/extract_case`). The
+extraction *mechanism* (`crates/extraction`) exists; scheduled fetch jobs
+against DoJ/SEC/FCA/OFAC feeding it are the natural next step (see Roadmap in
+the docs site).
 
 There is no search/filtering UI yet, even though the schema indexes
 `industry`/`jurisdiction` for it. Add query methods to `CaseRepository` as
