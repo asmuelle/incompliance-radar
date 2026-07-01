@@ -1,6 +1,6 @@
 use crate::server_fns::{
-    acknowledge_alert, ask_llm, create_watch_rule, delete_watch_rule, extract_case, list_alerts,
-    list_cases, list_watch_rules, CaseFilterQuery,
+    acknowledge_alert, ask_llm, create_watch_rule, delete_watch_rule, extract_case,
+    get_trend_report, list_alerts, list_cases, list_watch_rules, CaseFilterQuery,
 };
 use domain::ComplianceCase;
 use leptos::prelude::*;
@@ -57,6 +57,7 @@ pub fn App() -> impl IntoView {
                 <h1>"incomplianceRadar"</h1>
                 <p>"Tracking global compliance monitorships, DPAs and NPAs."</p>
             </header>
+            <TrendPanel extract_action/>
             <SearchPanel filter/>
             <CaseList extract_action filter/>
             <AlertsPanel extract_action/>
@@ -64,6 +65,146 @@ pub fn App() -> impl IntoView {
             <ExtractPanel extract_action/>
             <AskPanel/>
         </main>
+    }
+}
+
+#[component]
+fn TrendPanel(
+    extract_action: Action<String, Result<Option<ComplianceCase>, ServerFnError>>,
+) -> impl IntoView {
+    // Deliberately not tied to the search filter — trends summarize the
+    // whole tracked dataset, not whatever's currently being searched for.
+    let report = Resource::new(
+        move || extract_action.version().get(),
+        |_| async move { get_trend_report().await },
+    );
+
+    view! {
+        <section class="trend-panel">
+            <h2>"Trends"</h2>
+            <Suspense fallback=move || view! { <p>"Loading trends..."</p> }>
+                {move || {
+                    report
+                        .get()
+                        .map(|result| match result {
+                            Ok(report) => trend_report_view(report).into_any(),
+                            Err(err) => {
+                                view! { <p class="error">{format!("Failed to load trends: {err}")}</p> }
+                                    .into_any()
+                            }
+                        })
+                }}
+            </Suspense>
+        </section>
+    }
+}
+
+fn trend_report_view(report: domain::TrendReport) -> impl IntoView {
+    if report.total_cases == 0 {
+        return view! { <p>"No cases tracked yet."</p> }.into_any();
+    }
+
+    view! {
+        <div>
+            <p class="trend-panel__total">
+                {format!("{} tracked case(s)", report.total_cases)}
+            </p>
+            {bar_section("By industry", report.cases_by_industry)}
+            {bar_section("By regulator", report.resolutions_by_regulator)}
+            {bar_section("By violation type", report.resolutions_by_violation_type)}
+            {bar_section("By resolution kind", report.resolutions_by_kind)}
+            {bar_section("By status", report.resolutions_by_status)}
+            {rate_section("Monitorship rate by industry", report.monitorship_rate_by_industry)}
+            {amount_section("Total sanctions by currency", report.total_sanctions_by_currency)}
+        </div>
+    }
+    .into_any()
+}
+
+fn bar_section(title: &'static str, entries: Vec<domain::CountEntry>) -> impl IntoView {
+    if entries.is_empty() {
+        return ().into_any();
+    }
+    let max = entries.iter().map(|e| e.count).max().unwrap_or(1).max(1);
+
+    view! {
+        <div class="trend-section">
+            <h3>{title}</h3>
+            <ul class="trend-bars">
+                {entries
+                    .into_iter()
+                    .map(|entry| {
+                        let width_pct = (entry.count as f64 / max as f64 * 100.0).round();
+                        let value = entry.count.to_string();
+                        trend_bar_row(entry.label, width_pct, value)
+                    })
+                    .collect_view()}
+            </ul>
+        </div>
+    }
+    .into_any()
+}
+
+fn rate_section(title: &'static str, entries: Vec<domain::RateEntry>) -> impl IntoView {
+    if entries.is_empty() {
+        return ().into_any();
+    }
+
+    view! {
+        <div class="trend-section">
+            <h3>{title}</h3>
+            <ul class="trend-bars">
+                {entries
+                    .into_iter()
+                    .map(|entry| {
+                        let pct = (entry.rate * 100.0).round();
+                        let value = format!("{pct:.0}% (n={})", entry.sample_size);
+                        trend_bar_row(entry.label, pct, value)
+                    })
+                    .collect_view()}
+            </ul>
+        </div>
+    }
+    .into_any()
+}
+
+fn amount_section(title: &'static str, entries: Vec<domain::AmountEntry>) -> impl IntoView {
+    if entries.is_empty() {
+        return ().into_any();
+    }
+    let max = entries
+        .iter()
+        .map(|e| e.total)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+
+    view! {
+        <div class="trend-section">
+            <h3>{title}</h3>
+            <ul class="trend-bars">
+                {entries
+                    .into_iter()
+                    .map(|entry| {
+                        let width_pct = (entry.total / max * 100.0).round();
+                        let value = format!("{:.0} {}", entry.total, entry.currency);
+                        trend_bar_row(entry.currency.clone(), width_pct, value)
+                    })
+                    .collect_view()}
+            </ul>
+        </div>
+    }
+    .into_any()
+}
+
+fn trend_bar_row(label: String, width_pct: f64, value: String) -> impl IntoView {
+    view! {
+        <li class="trend-bars__row">
+            <span class="trend-bars__label">{label}</span>
+            <span class="trend-bars__track">
+                <span class="trend-bars__fill" style=format!("width: {width_pct}%")></span>
+            </span>
+            <span class="trend-bars__value">{value}</span>
+        </li>
     }
 }
 

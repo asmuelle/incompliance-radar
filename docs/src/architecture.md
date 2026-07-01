@@ -97,6 +97,18 @@ regardless of how it arrived. The UI's `WatchRulesPanel` manages rules;
 `AlertsPanel` shows and acknowledges triggered alerts. There's no actual
 notification delivery (email/push) — alerts only show up in-app.
 
+## Trend analysis
+
+`domain::compute_trend_report` is a pure function over `&[ComplianceCase]` —
+no database access, fully unit-testable with hand-built fixtures. It
+aggregates case counts by industry, resolution counts by regulator/violation
+type/kind/status, monitorship rate by industry, and total sanctions summed
+per currency (not converted to one currency). The `get_trend_report` server
+function calls `CaseRepository::list()` (the whole dataset, not the current
+search filter) and feeds it straight to `compute_trend_report`. `TrendPanel`
+renders each section as a simple CSS bar list rather than pulling in a JS
+charting library.
+
 ## Data flow (current state)
 
 Two ways a filing reaches `extraction::extract_case`:

@@ -20,8 +20,10 @@ Full-stack Rust using [Leptos](https://leptos.dev) (SSR + WASM) on
 ```
 crates/
   domain/     Wasm-safe core types (Company, ComplianceCase, Resolution, Monitor,
-              Sanction, ViolationType, Regulator). No tokio/reqwest/sqlx — must
-              compile for both native and wasm32-unknown-unknown.
+              Sanction, ViolationType, Regulator, WatchRule, Alert) plus pure
+              logic that needs no DB (WatchRule::matches, compute_trend_report).
+              No tokio/reqwest/sqlx — must compile for both native and
+              wasm32-unknown-unknown.
   llm/        Pluggable LLM provider abstraction. `LlmProvider` trait +
               `OllamaProvider` (local models) + `AnthropicProvider` (frontier).
               Server-only (uses reqwest/tokio); never a wasm target.
@@ -290,6 +292,38 @@ acknowledge), both in `web/app/src/app.rs`. `AlertsPanel`'s resource refetches
 on `(extract_action.version(), acknowledge_action.version())` — either a new
 extraction (which might trigger alerts) or an acknowledgment.
 
+## Trend analysis
+
+`domain::compute_trend_report(cases: &[ComplianceCase]) -> TrendReport` is a
+**pure function** — no DB access, fully unit-testable with hand-built
+`ComplianceCase` fixtures (see `crates/domain/src/trend_report.rs` tests).
+It aggregates: case counts by industry; resolution counts by regulator,
+violation type, kind, and status; monitorship rate by industry (share of an
+industry's resolutions with a monitor appointed — spec.md's "which
+industries does the DoJ currently favor monitors in", made concrete); and
+total sanctions summed per currency (deliberately *not* converted to one
+currency — that would need a live FX rate this app has no reason to depend
+on). Every `Vec` sorts descending by its metric, with the label as an
+alphabetical tiebreaker, so output (and tests) don't depend on `HashMap`
+iteration order.
+
+The `get_trend_report` server function (`web/app/src/server_fns.rs`) calls
+`CaseRepository::list()` (all cases, unfiltered — trends summarize the whole
+dataset, not whatever the search panel currently shows) and feeds the result
+straight to `compute_trend_report`. **Naming gotcha**: it's `get_trend_report`,
+not `trend_report` — naming the function to match its own return type
+(`TrendReport`) fails with a confusing orphan-rule error, because the
+`#[server]` macro PascalCases the function name for its generated request
+struct and collides with the imported type. If a future server function's
+name would PascalCase into an existing type name, rename the function, not
+the type.
+
+`TrendPanel` (`web/app/src/app.rs`) renders each section as a simple CSS bar
+list (`trend_bar_row`, width set via inline `style="width: {pct}%"`) rather
+than pulling in a JS charting library — proportional to what a scaffold
+needs. Its resource is tied only to `extract_action.version()`, not the
+search filter, matching the "whole dataset" framing above.
+
 ## Commands
 
 ```bash
@@ -333,6 +367,13 @@ the tradeoff as discussed). There's also no actual notification delivery
 (email/SMS/push) — alerts only ever show up in the in-app `AlertsPanel`;
 adding a delivery channel means picking and configuring an external service
 (SMTP, a push provider, ...), deliberately out of scope for this scaffold.
+
+Trend analysis has no time dimension — `compute_trend_report` aggregates
+across all cases at once, there's no "over time" breakdown (e.g. monitors
+appointed per quarter), because `domain::Resolution.signed_on` is often
+`None` for extracted cases (the LLM doesn't always find a date) and a
+time-series view needs denser real data to be worth building. Revisit once
+the crawler has accumulated enough cases with reliable dates.
 
 ## Conventions
 

@@ -131,6 +131,67 @@ body {
   flex: 1 1 10rem;
 }
 
+.trend-panel {
+  margin-bottom: 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.trend-panel__total {
+  color: rgba(232, 234, 240, 0.7);
+  font-size: 0.9rem;
+}
+
+.trend-section {
+  margin-top: 1.25rem;
+}
+
+.trend-section h3 {
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+}
+
+.trend-bars {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.trend-bars__row {
+  display: grid;
+  grid-template-columns: 9rem 1fr 6rem;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.trend-bars__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trend-bars__track {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 0.2rem;
+  height: 0.6rem;
+  overflow: hidden;
+}
+
+.trend-bars__fill {
+  display: block;
+  height: 100%;
+  background: #4f8cff;
+  border-radius: 0.2rem;
+}
+
+.trend-bars__value {
+  text-align: right;
+  color: rgba(232, 234, 240, 0.75);
+}
+
 .error {
   color: #ff6b6b;
 }

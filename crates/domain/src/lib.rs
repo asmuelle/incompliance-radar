@@ -9,6 +9,7 @@ pub mod monitor;
 pub mod regulator;
 pub mod resolution;
 pub mod sanction;
+pub mod trend_report;
 pub mod violation;
 pub mod watch_rule;
 
@@ -19,5 +20,6 @@ pub use monitor::Monitor;
 pub use regulator::Regulator;
 pub use resolution::{Resolution, ResolutionKind, ResolutionStatus};
 pub use sanction::Sanction;
+pub use trend_report::{compute_trend_report, AmountEntry, CountEntry, RateEntry, TrendReport};
 pub use violation::ViolationType;
 pub use watch_rule::WatchRule;

@@ -6,8 +6,9 @@ live query panel against the configured LLM backend, an LLM-based extraction
 pipeline (`crates/extraction`), a crawler (`crates/crawler`) that pulls real
 press releases from the SEC and FCA and feeds them through extraction
 automatically, search/filtering by industry, jurisdiction, violation type,
-and law firm/monitor, and global watch-rule alerts. Trend analysis from
-[Product Concept](product-concept.md) is not built yet.
+and law firm/monitor, global watch-rule alerts, and a trend/benchmark
+dashboard. Every core feature in [Product Concept](product-concept.md) has a
+working (if scoped-down) implementation now.
 
 Rough next steps, roughly in dependency order:
 
@@ -37,7 +38,13 @@ Rough next steps, roughly in dependency order:
    show/acknowledge triggered alerts. No actual notification delivery
    (email/push) — in-app only. Revisit user-scoping if/when real
    multi-user need emerges.
-6. **Trend/benchmark analysis** — aggregate statistics across tracked cases.
+6. ~~**Trend/benchmark analysis**~~ — done: `domain::compute_trend_report`
+   (pure function, no DB access) aggregates case/resolution counts,
+   monitorship rate by industry, and total sanctions by currency;
+   `get_trend_report` feeds it the whole dataset (not the search filter);
+   `TrendPanel` renders it as simple CSS bar lists. No time-series/trend-
+   over-time view yet — extracted cases don't reliably have a `signed_on`
+   date, so a "per quarter" breakdown isn't meaningful with today's data.
 7. **Routing** (`leptos_router`) — only once there's a second page to
    justify it.
 8. **OFAC connector, and a real DoJ data source** — e.g. an official

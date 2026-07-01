@@ -17,9 +17,10 @@ Early-stage scaffold: a working full-stack app with SQLite-backed persistence
 (seeded with fictional demo data on first run), a live LLM query panel, an
 LLM-based extraction pipeline, a crawler that pulls real press releases from
 the SEC and FCA and feeds them through it automatically, search/filtering by
-industry, jurisdiction, violation type, and law firm/monitor, and global
+industry, jurisdiction, violation type, and law firm/monitor, global
 watch-rule alerts (industry/competitor watch — not per-user, this app has no
-auth system). Trend analysis described in `spec.md` is not built yet. See
+auth system), and a trend/benchmark dashboard (case and violation counts,
+monitorship rate by industry, total sanctions by currency). See
 [`CLAUDE.md`](CLAUDE.md) for the current architecture and what's next.
 
 ## Getting started

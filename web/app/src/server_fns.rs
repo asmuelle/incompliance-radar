@@ -1,4 +1,4 @@
-use domain::{Alert, ComplianceCase, WatchRule};
+use domain::{Alert, ComplianceCase, TrendReport, WatchRule};
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -138,4 +138,26 @@ pub async fn acknowledge_alert(id: uuid::Uuid) -> Result<(), ServerFnError> {
         .acknowledge_alert(id)
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+/// Aggregate statistics across every tracked case (not filtered by the
+/// search panel — trends should reflect the whole dataset). See
+/// `domain::compute_trend_report` for what's computed.
+///
+/// Named `get_trend_report`, not `trend_report`: the `#[server]` macro
+/// PascalCases the function name for its generated request struct, which
+/// would collide with the imported `domain::TrendReport` return type and
+/// fail with a confusing orphan-rule error (`only traits defined in the
+/// current crate can be implemented for types defined outside of the
+/// crate`) — the macro ends up targeting the imported type instead of a
+/// struct of its own.
+#[server(endpoint = "/trend_report")]
+pub async fn get_trend_report() -> Result<TrendReport, ServerFnError> {
+    let repo = use_context::<std::sync::Arc<dyn db::CaseRepository>>()
+        .ok_or_else(|| ServerFnError::new("case repository not available"))?;
+    let cases = repo
+        .list()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    Ok(domain::compute_trend_report(&cases))
 }
