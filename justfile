@@ -51,6 +51,16 @@ check:
 crawl:
     cargo run -p crawler --bin crawl
 
+# Download the Corporate Prosecution Registry bulk export and import the
+# historical DPA/NPA/declination corpus into the local database. Idempotent —
+# re-running refreshes imported cases instead of duplicating them. See
+# CLAUDE.md's Importer section, including the data-licensing caveat, before
+# shipping this data in a commercial deployment.
+import-registry:
+    mkdir -p data
+    curl -sSL -o data/corp-crime.csv https://corporate-prosecution-registry.com/media/corp-crime.csv
+    cargo run -p importer --bin import-registry -- data/corp-crime.csv
+
 # Everything CI runs, in the same order (.github/workflows/ci.yml), so you
 # can catch failures locally before pushing.
 ci: fmt-check clippy-native clippy-wasm test build-release

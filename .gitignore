@@ -1,5 +1,7 @@
 /target
 /web/target
+# Downloaded Corporate Prosecution Registry bulk data (see `just import-registry`)
+/data/
 node_modules/
 .env
 .env.local

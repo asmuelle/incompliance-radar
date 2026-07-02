@@ -36,6 +36,9 @@ crates/
   crawler/    Scheduled fetch jobs (`FilingSource` trait + SEC/FCA
               connectors) feeding `extraction`. Standalone `crawl` binary,
               not part of the web app. Server-only.
+  importer/   One-shot bulk import of the Corporate Prosecution Registry
+              dataset (historical DPA/NPA corpus). Standalone
+              `import-registry` binary, no LLM involved. Server-only.
 web/
   app/        Shared UI: the `App` component, `shell()` HTML document,
               `#[server]` functions (server_fns.rs), and fictional seed data
@@ -239,6 +242,67 @@ periodically yourself, e.g. via cron:
 0 */6 * * * cd /path/to/incompliance-radar && DATABASE_URL=sqlite://incompliance-radar.db LLM_BACKEND=ollama ./target/release/crawl >> crawl.log 2>&1
 ```
 
+## Historical import (Corporate Prosecution Registry)
+
+`crates/importer` backfills the database with real historical cases from the
+[Corporate Prosecution Registry](https://corporate-prosecution-registry.com/)
+(Duke Law / UVA — Brandon Garrett's dataset of federal organizational
+prosecutions), so search/trends/benchmarks run on a real corpus instead of
+the two fictional seed cases. `just import-registry` downloads the bulk CSV
+export to `data/` (gitignored) and runs the `import-registry` binary;
+`DATABASE_URL` selects the target database, same default as the server and
+crawler.
+
+**Licensing caveat:** the registry site states no explicit license for the
+bulk data. Before building a *commercial* service on it, get reuse terms in
+writing from the maintainers (Prof. Brandon Garrett / Jon Ashley, UVA). The
+importer existing does not settle that question.
+
+Design points, all deliberate:
+
+- **Curated default subset.** Only `DP`, `NP` and `declination` dispositions
+  import by default (~765 rows → ~746 cases, 107 with monitors) — the
+  on-spec DPA/NPA corpus. The registry's ~3,600 plea agreements and other
+  outcomes (trial, dismissal, ...) are available via
+  `--dispositions=DP,NP,declination,plea,trial`, but the UI has no
+  pagination yet and trend stats (e.g. monitorship rate) read differently
+  when thousands of small environmental/immigration pleas dominate.
+- **Idempotent re-runs.** Imported case/company IDs are UUIDv5 of the
+  normalized company name under a fixed namespace (`deterministic_id` in
+  `crates/importer/src/lib.rs`), so re-importing an updated export refreshes
+  existing rows instead of duplicating them. Crawled/manually-extracted
+  cases use random v4 IDs and are never touched. Rows are grouped by
+  normalized company name into one `ComplianceCase` with multiple
+  resolutions (the registry has no stable company key; docket numbers repeat
+  across districts).
+- **No watch-rule alerts on bulk import** — unlike the crawler's
+  `ingest_filing`, the importer never calls `db::evaluate_case`. A backfill
+  of hundreds of historical cases would flood `AlertsPanel` and bury any
+  real, current alert.
+- **`RegistryRecord` (record.rs) is a loose all-strings DTO** like
+  `extraction`'s `ParsedCase`; `map.rs` is the validation boundary. Only
+  concepts that genuinely coincide map onto `domain` enum variants (`DP`→DPA,
+  `FCPA`→Bribery, ...); everything else keeps its registry label via
+  `Other(..)` rather than being force-fitted. NAICS codes map to 2-digit
+  sector names (naics.rs); frequent countries normalize to the short codes
+  the app already uses ("US", "UK", ...).
+- **Status is inferred, not recorded.** The registry doesn't track
+  active/completed, so `infer_status` derives it: term elapsed (or a
+  conservative 60-month assumption when no term is recorded) → Completed,
+  else Active; undated rows → Completed. It never produces
+  Breached/Terminated.
+- **Sanctions never double-count**: itemized fine/forfeiture/restitution are
+  preferred and `TOTAL_PAYMENT` is only used when no component exists —
+  `compute_trend_report` sums sanction amounts per currency.
+- `Resolution.source` gets a `"Corporate Prosecution Registry: ..."`
+  citation (not a URL), which also serves as provenance and can't collide
+  with the crawler's URL-based dedup.
+
+The web server seeds fictional demo cases only into an *empty* database, so
+importing first means the demo seeds never appear; importing into an
+already-seeded database leaves the two clearly-labeled fictional cases
+alongside the real corpus (delete them via the repository if that matters).
+
 ## Search and filtering
 
 `list_cases` (`web/app/src/server_fns.rs`) takes a `CaseFilterQuery` (plain
@@ -360,8 +424,12 @@ when there's a second page to justify it (YAGNI).
 
 Search only covers the four fields in `CaseFilter`. There's no free-text
 search across obligations/sanctions descriptions, no date-range filtering,
-and no pagination — fine at today's scale (a handful of cases), revisit once
-the crawler has been running long enough to accumulate a real backlog.
+and no pagination. With the registry backfill (~750 cases) the no-pagination
+gap is now the most user-visible one: an unfiltered `CaseList` renders the
+whole corpus in one page. It still works, but pagination (or at least a
+result cap + count) is the next UI improvement this data justifies; the
+in-memory violation/monitor filtering in `db::sqlite::search` is also worth
+revisiting past a few thousand cases.
 
 Alerts are global watch rules, not per-user — there's no auth/user system at
 all (deliberate: building real per-user scoping means building authentication
@@ -373,10 +441,10 @@ adding a delivery channel means picking and configuring an external service
 
 Trend analysis has no time dimension — `compute_trend_report` aggregates
 across all cases at once, there's no "over time" breakdown (e.g. monitors
-appointed per quarter), because `domain::Resolution.signed_on` is often
-`None` for extracted cases (the LLM doesn't always find a date) and a
-time-series view needs denser real data to be worth building. Revisit once
-the crawler has accumulated enough cases with reliable dates.
+appointed per quarter). That was originally because `signed_on` was rarely
+populated; the registry backfill changed that (nearly every imported
+resolution is dated, spanning ~three decades), so a time-series view is now
+genuinely worth building — it just hasn't been yet.
 
 ## Conventions
 

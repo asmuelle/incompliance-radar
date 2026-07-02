@@ -1,0 +1,24 @@
+[package]
+name = "importer"
+version = "0.1.0"
+edition = "2021"
+description = "One-shot bulk import of the Corporate Prosecution Registry dataset into the case repository."
+
+[[bin]]
+name = "import-registry"
+path = "src/bin/import_registry.rs"
+
+[dependencies]
+domain = { path = "../domain" }
+db = { path = "../db" }
+csv = "1"
+serde = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true, features = ["v5"] }
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -6,6 +6,7 @@ members = [
   "crates/db",
   "crates/extraction",
   "crates/crawler",
+  "crates/importer",
   "web/app",
   "web/frontend",
   "web/server",
