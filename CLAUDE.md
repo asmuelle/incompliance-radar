@@ -326,6 +326,9 @@ search filter, matching the "whole dataset" framing above.
 
 ## Commands
 
+There's a `justfile` wrapping all of these (`just --list` to see recipes,
+`just ci` runs everything CI runs in the same order). Raw `cargo` equivalents:
+
 ```bash
 cargo leptos watch          # dev server with hot reload, http://127.0.0.1:3000
 cargo leptos build          # production build (native server + wasm client)

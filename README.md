@@ -25,7 +25,8 @@ monitorship rate by industry, total sanctions by currency). See
 
 ## Getting started
 
-Prerequisites:
+Prerequisites (or run `just install-tools` if you have
+[`just`](https://github.com/casey/just) installed):
 
 ```bash
 rustup target add wasm32-unknown-unknown
@@ -38,7 +39,7 @@ Run with a local model (default, requires [Ollama](https://ollama.com) running):
 ```bash
 ollama pull llama3.1   # or any model you have; set OLLAMA_MODEL to match
 cp .env.example .env
-cargo leptos watch
+just watch   # or: cargo leptos watch
 ```
 
 Open http://127.0.0.1:3000.
@@ -56,7 +57,7 @@ One pass across the configured regulator sources (SEC, FCA), extracting and
 persisting any enforcement actions found:
 
 ```bash
-cargo run -p crawler --bin crawl
+just crawl   # or: cargo run -p crawler --bin crawl
 ```
 
 Not scheduled — invoke it periodically yourself (cron, a systemd timer, ...).
@@ -80,10 +81,15 @@ docs/            GitHub Pages source (mdBook)
 ## Development
 
 ```bash
-cargo test --workspace
-cargo fmt --all
-cargo clippy --workspace --exclude frontend -- -D warnings
+just --list   # all available recipes
+just test
+just fmt
+just clippy
+just ci       # everything CI runs, in the same order — catch failures before pushing
 ```
+
+Equivalent raw `cargo` commands are in the `justfile` and in
+[`CLAUDE.md`](CLAUDE.md) if you'd rather not install `just`.
 
 ## License
 
