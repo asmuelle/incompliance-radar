@@ -165,6 +165,7 @@ mod tests {
         sanctions: Vec<Sanction>,
     ) -> Resolution {
         Resolution {
+            regime: regulator.regime.clone().unwrap_or_default(),
             regulator,
             kind,
             status,
@@ -201,7 +202,7 @@ mod tests {
     fn counts_cases_by_industry() {
         let mut acme = ComplianceCase::new(Company::new("Acme", "Banking", "US"));
         acme.resolutions.push(resolution(
-            Regulator::Sec,
+            Regulator::sec(),
             ResolutionKind::ConsentOrder,
             ResolutionStatus::Completed,
             vec![ViolationType::MoneyLaundering],
@@ -210,7 +211,7 @@ mod tests {
         ));
         let mut widget = ComplianceCase::new(Company::new("Widget Corp", "Banking", "UK"));
         widget.resolutions.push(resolution(
-            Regulator::Fca,
+            Regulator::fca(),
             ResolutionKind::ConsentOrder,
             ResolutionStatus::Active,
             vec![ViolationType::Bribery],
@@ -242,7 +243,7 @@ mod tests {
     fn monitorship_rate_reflects_share_of_resolutions_with_a_monitor() {
         let mut banking_with_monitor = ComplianceCase::new(Company::new("Acme", "Banking", "US"));
         banking_with_monitor.resolutions.push(resolution(
-            Regulator::Doj,
+            Regulator::doj(),
             ResolutionKind::DeferredProsecutionAgreement,
             ResolutionStatus::Active,
             vec![],
@@ -252,7 +253,7 @@ mod tests {
         let mut banking_without_monitor =
             ComplianceCase::new(Company::new("Widget", "Banking", "US"));
         banking_without_monitor.resolutions.push(resolution(
-            Regulator::Sec,
+            Regulator::sec(),
             ResolutionKind::ConsentOrder,
             ResolutionStatus::Completed,
             vec![],
@@ -275,7 +276,7 @@ mod tests {
     fn sums_sanctions_per_currency_without_converting() {
         let mut usd_case = ComplianceCase::new(Company::new("Acme", "Banking", "US"));
         usd_case.resolutions.push(resolution(
-            Regulator::Sec,
+            Regulator::sec(),
             ResolutionKind::ConsentOrder,
             ResolutionStatus::Completed,
             vec![],
@@ -295,7 +296,7 @@ mod tests {
         ));
         let mut gbp_case = ComplianceCase::new(Company::new("Widget", "Banking", "UK"));
         gbp_case.resolutions.push(resolution(
-            Regulator::Fca,
+            Regulator::fca(),
             ResolutionKind::ConsentOrder,
             ResolutionStatus::Completed,
             vec![],

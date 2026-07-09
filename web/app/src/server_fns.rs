@@ -96,18 +96,33 @@ pub async fn list_watch_rules() -> Result<Vec<WatchRule>, ServerFnError> {
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 
+/// The three resolution-level criteria arrive as plain strings (wasm-safe
+/// DTO style, like `CaseFilterQuery`): `regime`/`violation_type` are display
+/// labels parsed via `Regime::parse`/`ViolationType::parse` (unknown text
+/// becomes `Other(..)` rather than being dropped), and `regulator` is free
+/// text resolved to a canonical slug via `Regulator::normalize`.
 #[server(endpoint = "/create_watch_rule")]
 pub async fn create_watch_rule(
     label: String,
     industry: Option<String>,
     company_name_contains: Option<String>,
+    regime: Option<String>,
+    regulator: Option<String>,
+    violation_type: Option<String>,
 ) -> Result<WatchRule, ServerFnError> {
     let rule = WatchRule::new(
         label,
         industry,
         company_name_contains,
         chrono::Utc::now().naive_utc(),
-    );
+    )
+    .with_regime(regime.as_deref().map(domain::Regime::parse))
+    .with_regulator_slug(
+        regulator
+            .as_deref()
+            .map(|text| domain::Regulator::normalize(text).slug),
+    )
+    .with_violation_type(violation_type.as_deref().map(domain::ViolationType::parse));
     alert_repo_context()?
         .create_rule(&rule)
         .await

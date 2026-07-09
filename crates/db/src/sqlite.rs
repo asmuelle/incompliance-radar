@@ -234,7 +234,8 @@ mod tests {
     ) -> ComplianceCase {
         let mut case = ComplianceCase::new(Company::new(name, industry, jurisdiction));
         case.resolutions.push(domain::Resolution {
-            regulator: domain::Regulator::Sec,
+            regime: domain::Regime::default(),
+            regulator: domain::Regulator::sec(),
             kind: domain::ResolutionKind::ConsentOrder,
             status: domain::ResolutionStatus::Active,
             signed_on: None,

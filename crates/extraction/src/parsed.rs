@@ -101,16 +101,22 @@ impl ParsedCase {
         );
         let mut case = ComplianceCase::new(company);
 
+        let regulator = self
+            .regulator
+            .as_deref()
+            .map(Regulator::normalize)
+            .unwrap_or_else(|| Regulator::other(UNKNOWN));
+
         case.resolutions.push(Resolution {
-            regulator: self
-                .regulator
-                .as_deref()
-                .map(parse_regulator)
-                .unwrap_or(Regulator::Other(UNKNOWN.to_string())),
+            // The filing text doesn't name a regime; the regulator's primary
+            // regime is the best signal until per-regime prompts exist
+            // (defaulting to CorporateProsecution for unknown regulators).
+            regime: regulator.regime.clone().unwrap_or_default(),
+            regulator,
             kind: self
                 .resolution_kind
                 .as_deref()
-                .map(parse_resolution_kind)
+                .map(ResolutionKind::parse)
                 .unwrap_or(ResolutionKind::Other(UNKNOWN.to_string())),
             status,
             signed_on: parse_date(self.signed_on.as_deref())?,
@@ -119,7 +125,11 @@ impl ParsedCase {
                 .monitor
                 .map(ParsedMonitor::try_into_domain)
                 .transpose()?,
-            violations: self.violations.iter().map(|v| parse_violation(v)).collect(),
+            violations: self
+                .violations
+                .iter()
+                .map(|v| ViolationType::parse(v))
+                .collect(),
             sanctions: self
                 .sanctions
                 .into_iter()
@@ -187,43 +197,10 @@ fn parse_status(value: &str) -> Result<ResolutionStatus, ExtractionError> {
     }
 }
 
-fn parse_regulator(value: &str) -> Regulator {
-    match value.to_lowercase().as_str() {
-        "doj" => Regulator::Doj,
-        "sec" => Regulator::Sec,
-        "fca" => Regulator::Fca,
-        "ofac" => Regulator::Ofac,
-        "sfo" => Regulator::Sfo,
-        _ => Regulator::Other(value.to_string()),
-    }
-}
-
-fn normalize(value: &str) -> String {
-    value.to_lowercase().replace([' ', '-', '_'], "")
-}
-
-fn parse_resolution_kind(value: &str) -> ResolutionKind {
-    match normalize(value).as_str() {
-        "deferredprosecutionagreement" | "dpa" => ResolutionKind::DeferredProsecutionAgreement,
-        "nonprosecutionagreement" | "npa" => ResolutionKind::NonProsecutionAgreement,
-        "consentorder" => ResolutionKind::ConsentOrder,
-        "monitorship" => ResolutionKind::Monitorship,
-        _ => ResolutionKind::Other(value.to_string()),
-    }
-}
-
-fn parse_violation(value: &str) -> ViolationType {
-    match normalize(value).as_str() {
-        "bribery" | "fcpa" => ViolationType::Bribery,
-        "moneylaundering" => ViolationType::MoneyLaundering,
-        "sanctionsviolation" => ViolationType::SanctionsViolation,
-        "antitrustfraud" | "antitrust" => ViolationType::AntitrustFraud,
-        "securitiesfraud" => ViolationType::SecuritiesFraud,
-        "taxevasion" => ViolationType::TaxEvasion,
-        "exportcontrol" => ViolationType::ExportControl,
-        _ => ViolationType::Other(value.to_string()),
-    }
-}
+// Regulator/resolution-kind/violation normalization lives in `domain`
+// (`Regulator::normalize`, `ResolutionKind::parse`, `ViolationType::parse`)
+// so the importer, watch rules and server functions share one vocabulary
+// with extraction instead of drifting copies.
 
 #[cfg(test)]
 mod tests {
@@ -258,7 +235,9 @@ mod tests {
         assert_eq!(case.company.name, "Acme Global Industries");
         assert_eq!(case.resolutions.len(), 1);
         let resolution = &case.resolutions[0];
-        assert_eq!(resolution.regulator, Regulator::Doj);
+        assert_eq!(resolution.regulator, Regulator::doj());
+        // Regime is inferred from the regulator's primary regime.
+        assert_eq!(resolution.regime, domain::Regime::CorporateProsecution);
         assert_eq!(resolution.status, ResolutionStatus::Active);
         assert_eq!(resolution.violations, vec![ViolationType::Bribery]);
         assert_eq!(resolution.monitor.as_ref().unwrap().name, "Jane Doe");
@@ -318,17 +297,14 @@ mod tests {
 
     #[test]
     fn unrecognized_regulator_falls_back_to_other() {
-        assert_eq!(
-            parse_regulator("BaFin"),
-            Regulator::Other("BaFin".to_string())
-        );
+        assert_eq!(Regulator::normalize("BaFin"), Regulator::other("BaFin"));
     }
 
     #[test]
     fn unrecognized_violation_falls_back_to_other() {
         assert_eq!(
-            parse_violation("Insider Trading"),
-            ViolationType::Other("Insider Trading".to_string())
+            ViolationType::parse("Jaywalking"),
+            ViolationType::Other("Jaywalking".to_string())
         );
     }
 
@@ -378,10 +354,7 @@ mod tests {
 
         assert_eq!(case.company.industry, UNKNOWN);
         assert_eq!(case.company.jurisdiction, UNKNOWN);
-        assert_eq!(
-            case.resolutions[0].regulator,
-            Regulator::Other(UNKNOWN.to_string())
-        );
+        assert_eq!(case.resolutions[0].regulator, Regulator::other(UNKNOWN));
         assert_eq!(
             case.resolutions[0].kind,
             ResolutionKind::Other(UNKNOWN.to_string())

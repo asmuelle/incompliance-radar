@@ -34,7 +34,8 @@ mod tests {
 
     fn resolution_with_status(status: ResolutionStatus) -> Resolution {
         Resolution {
-            regulator: Regulator::Doj,
+            regime: crate::Regime::CorporateProsecution,
+            regulator: Regulator::doj(),
             kind: ResolutionKind::DeferredProsecutionAgreement,
             status,
             signed_on: None,

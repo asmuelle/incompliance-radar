@@ -20,10 +20,11 @@ Full-stack Rust using [Leptos](https://leptos.dev) (SSR + WASM) on
 ```
 crates/
   domain/     Wasm-safe core types (Company, ComplianceCase, Resolution, Monitor,
-              Sanction, ViolationType, Regulator, WatchRule, Alert) plus pure
-              logic that needs no DB (WatchRule::matches, compute_trend_report).
-              No tokio/reqwest/sqlx — must compile for both native and
-              wasm32-unknown-unknown.
+              Sanction, ViolationType, Regime, Regulator, WatchRule, Alert)
+              plus pure logic that needs no DB (WatchRule::matches,
+              compute_trend_report). No tokio/reqwest/sqlx — must compile for
+              both native and wasm32-unknown-unknown. See "Multi-regime domain
+              model" below for Regime and the Regulator registry.
   llm/        Pluggable LLM provider abstraction. `LlmProvider` trait +
               `OllamaProvider` (local models) + `AnthropicProvider` (frontier).
               Server-only (uses reqwest/tokio); never a wasm target.
@@ -72,6 +73,42 @@ gets built for wasm32-unknown-unknown, or the wasm build breaks. Concretely:
   the crate weren't available there.
 - Don't add axum/tokio/sqlx/reqwest as unconditional dependencies of
   `web/app` — always gate them behind `ssr` the same way.
+
+## Multi-regime domain model
+
+Phase 0 of the "EnforcementRadar, multi-regime" direction: the domain model
+covers enforcement regimes beyond DPAs/NPAs, even though SEC/FCA crawling and
+the registry importer are still the only data inflows.
+
+- **`domain::Regime`** (`crates/domain/src/regime.rs`) is a first-class
+  enforcement-domain enum (CorporateProsecution, SecuritiesEnforcement,
+  BankingSupervision, DataProtection, SanctionsEnforcement,
+  ConsumerProtection, `Other(_)`). Every `Resolution` carries one;
+  `#[serde(default)]` maps all pre-regime stored JSON to
+  `CorporateProsecution` (the only regime that existed then), so **no data
+  migration** — old rows keep that default even where the regulator implies
+  otherwise (e.g. the pre-existing seeded OFAC case); only new writes get
+  regulator-inferred regimes.
+- **`domain::Regulator` is a struct backed by a curated static registry**
+  (`REGISTRY` in `crates/domain/src/regulator.rs`: slug, name, short_name,
+  jurisdiction, primary regime, aliases), not an enum — ~30 EU DPAs and
+  dozens of US bodies would all have collapsed into `Other(String)`.
+  `Regulator::normalize(free_text)` resolves names/aliases to a registry
+  entry, `Regulator::other(name)` carries unknowns verbatim with a derived
+  kebab slug. **Serde compat is load-bearing**: the custom `Deserialize`
+  accepts the legacy enum encodings (`"Doj"`, `"Sec"`, ..., `{"Other":
+  "..."}`) that live in stored case JSON indefinitely — don't remove that
+  path without migrating `compliance_cases` (see regulator.rs +
+  resolution.rs tests).
+- **Vocabulary normalization lives in `domain`** — `ResolutionKind::parse`,
+  `ViolationType::parse`, `Regime::parse` (plus `Regulator::normalize`) are
+  shared by extraction, watch rules and server functions, so display labels
+  in UI dropdowns must roundtrip through `parse` (tested in violation.rs and
+  regime.rs).
+- **What Phase 0 deliberately does not do**: no regime facet in
+  `CaseFilter`/search UI, no regime dimension in `compute_trend_report`, no
+  regime-aware extraction prompts, no new connectors — those are the next
+  phases, once a second regime has a data source.
 
 ## LLM backend
 
@@ -172,13 +209,20 @@ turns raw filing text into a `domain::ComplianceCase` using any
    sometimes add despite instructions not to, taking the outermost `{...}`.
 4. `parsed::ParsedCase` (a plain-string DTO, deliberately looser than
    `domain`'s types) deserializes the JSON, then `try_into_domain` validates
-   it at the boundary: known enum values (regulator, resolution kind,
-   violation type) map to their `domain` variant with an `Other(_)` fallback
-   for anything unrecognized; `status` has **no** fallback (`domain::
-   ResolutionStatus` has no `Other` variant) and is rejected if it isn't
-   exactly one of active/completed/terminated/breached; dates must parse as
-   `YYYY-MM-DD`; sanction amounts must be non-negative. See
-   `crates/extraction/src/parsed.rs` tests for the exact validation matrix.
+   it at the boundary: the regulator string resolves via
+   `domain::Regulator::normalize` (registry match or an `other(..)`
+   fallback), resolution kind and violation types map via
+   `domain::ResolutionKind::parse`/`ViolationType::parse` with an `Other(_)`
+   fallback for anything unrecognized — the normalization vocabulary lives
+   in `domain`, shared with watch rules and server functions, not in this
+   crate; `status` has **no** fallback (`domain::ResolutionStatus` has no
+   `Other` variant) and is rejected if it isn't exactly one of
+   active/completed/terminated/breached; dates must parse as `YYYY-MM-DD`;
+   sanction amounts must be non-negative. The resolution's `regime` is
+   inferred from the resolved regulator's primary regime (defaulting to
+   `CorporateProsecution` for unknown regulators) until per-regime prompts
+   exist. See `crates/extraction/src/parsed.rs` tests for the exact
+   validation matrix.
 
 The `extract_case` server function (`web/app/src/server_fns.rs`) wires it
 end-to-end: raw text → `extraction::extract_case` → `CaseRepository::upsert`
@@ -329,11 +373,19 @@ monitor-firm stay free-text inputs since the underlying data is free text too.
 
 Global watch rules, **not per-user** — this app has no auth/user system (a
 deliberate scope decision, not an oversight; see Current known gaps).
-`domain::WatchRule` (`industry`/`company_name_contains`, ANDed, case-
-insensitive substring match on company name) has a pure `matches(&self, case)`
-method with no DB dependency, so it's fully unit-testable without a database
-(see `crates/domain/src/watch_rule.rs` tests). A rule with no criteria set
-never matches anything — it's not "match everything".
+`domain::WatchRule` has two company-level criteria (`industry`,
+`company_name_contains` — case-insensitive substring match on company name)
+and three resolution-level criteria (`regime`, `regulator_slug`,
+`violation_type`), all ANDed. The resolution-level criteria must all hold on
+a **single** resolution — "a data-protection fine from the DPC" means one
+resolution that is both, not a DPC resolution plus an unrelated
+data-protection one elsewhere on the case. `matches(&self, case)` is pure,
+with no DB dependency, so it's fully unit-testable without a database (see
+`crates/domain/src/watch_rule.rs` tests). A rule with no criteria set never
+matches anything — it's not "match everything". In the DB, the enum-valued
+criteria (`regime`, `violation_type`) are stored as serde-JSON text columns
+so `Other(..)` values round-trip exactly (migration 0003;
+`parse_enum_json`/`to_enum_json` in `crates/db/src/sqlite_alerts.rs`).
 
 `db::evaluate_case(case, alert_repo)` lists all rules, checks each against
 `case`, and calls `AlertRepository::record_alert` for every match, returning

@@ -1,0 +1,12 @@
+# Xcode 26's default linker (ld-prime) asserts on the very long monomorphized
+# symbol names Leptos view types produce in release builds:
+#   ld: Assertion failed: (name.size() <= maxLength), ... SymbolString.cpp
+# Falling back to the classic linker for native macOS builds only — scoped
+# per-target so the flag never reaches the wasm32 link (rust-lld doesn't
+# understand Mach-O linker args). Deprecated by Apple but still shipped;
+# remove once ld-prime lifts the symbol-length assertion.
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-ld_classic"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-ld_classic"]

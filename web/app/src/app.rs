@@ -19,6 +19,21 @@ const VIOLATION_TYPE_OPTIONS: &[&str] = &[
     "Securities Fraud",
     "Tax Evasion",
     "Export Control",
+    "Data Protection",
+    "Consumer Protection",
+    "Environmental",
+    "Market Abuse",
+];
+
+/// Known `Regime` display labels for the watch-rule dropdown — must stay
+/// parseable by `domain::Regime::parse` (see its roundtrip test).
+const REGIME_OPTIONS: &[&str] = &[
+    "Corporate Prosecution",
+    "Securities Enforcement",
+    "Banking Supervision",
+    "Data Protection",
+    "Sanctions Enforcement",
+    "Consumer Protection",
 ];
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -464,14 +479,18 @@ fn WatchRulesPanel() -> impl IntoView {
     let (label, set_label) = signal(String::new());
     let (industry, set_industry) = signal(String::new());
     let (company, set_company) = signal(String::new());
+    let (regime, set_regime) = signal(String::new());
+    let (regulator, set_regulator) = signal(String::new());
+    let (violation, set_violation) = signal(String::new());
 
     let create_action = Action::new(move |_: &()| {
         let label = label.get_untracked();
-        let industry_value = industry.get_untracked();
-        let company_value = company.get_untracked();
-        let industry = (!industry_value.is_empty()).then_some(industry_value);
-        let company = (!company_value.is_empty()).then_some(company_value);
-        async move { create_watch_rule(label, industry, company).await }
+        let industry = non_empty(industry.get_untracked());
+        let company = non_empty(company.get_untracked());
+        let regime = non_empty(regime.get_untracked());
+        let regulator = non_empty(regulator.get_untracked());
+        let violation = non_empty(violation.get_untracked());
+        async move { create_watch_rule(label, industry, company, regime, regulator, violation).await }
     });
     let delete_action = Action::new(|id: &Uuid| {
         let id = *id;
@@ -487,7 +506,7 @@ fn WatchRulesPanel() -> impl IntoView {
         <section class="watch-rules-panel">
             <h2>"Watch rules"</h2>
             <p class="hint">
-                "Get alerted when a new case matches an industry and/or a company name (e.g. to track a competitor)."
+                "Get alerted when a new case matches every criterion set: company (industry, name) and/or resolution (regime, regulator, violation) — e.g. \"any Data Protection fine against a Pharma company\"."
             </p>
             <div class="watch-rules-panel__form">
                 <input
@@ -508,11 +527,40 @@ fn WatchRulesPanel() -> impl IntoView {
                     prop:value=move || company.get()
                     on:input=move |ev| set_company.set(event_target_value(&ev))
                 />
+                <select
+                    prop:value=move || regime.get()
+                    on:change=move |ev| set_regime.set(event_target_value(&ev))
+                >
+                    <option value="">"Any regime"</option>
+                    {REGIME_OPTIONS
+                        .iter()
+                        .map(|option| view! { <option value=*option>{*option}</option> })
+                        .collect_view()}
+                </select>
+                <input
+                    type="text"
+                    placeholder="Regulator, e.g. \"DPC\" (optional)"
+                    prop:value=move || regulator.get()
+                    on:input=move |ev| set_regulator.set(event_target_value(&ev))
+                />
+                <select
+                    prop:value=move || violation.get()
+                    on:change=move |ev| set_violation.set(event_target_value(&ev))
+                >
+                    <option value="">"Any violation type"</option>
+                    {VIOLATION_TYPE_OPTIONS
+                        .iter()
+                        .map(|option| view! { <option value=*option>{*option}</option> })
+                        .collect_view()}
+                </select>
                 <button on:click=move |_| {
                     create_action.dispatch(());
                     set_label.set(String::new());
                     set_industry.set(String::new());
                     set_company.set(String::new());
+                    set_regime.set(String::new());
+                    set_regulator.set(String::new());
+                    set_violation.set(String::new());
                 }>"Add rule"</button>
             </div>
             <Suspense fallback=move || view! { <p>"Loading watch rules..."</p> }>
@@ -540,6 +588,10 @@ fn WatchRulesPanel() -> impl IntoView {
     }
 }
 
+fn non_empty(value: String) -> Option<String> {
+    (!value.is_empty()).then_some(value)
+}
+
 fn watch_rule_list_item(
     delete_action: Action<Uuid, Result<(), ServerFnError>>,
 ) -> impl Fn(domain::WatchRule) -> AnyView {
@@ -550,6 +602,13 @@ fn watch_rule_list_item(
             rule.company_name_contains
                 .as_ref()
                 .map(|c| format!("company contains: {c}")),
+            rule.regime.as_ref().map(|r| format!("regime: {r}")),
+            rule.regulator_slug
+                .as_ref()
+                .map(|r| format!("regulator: {r}")),
+            rule.violation_type
+                .as_ref()
+                .map(|v| format!("violation: {v}")),
         ]
         .into_iter()
         .flatten()

@@ -8,6 +8,7 @@ description = "SQLite-backed persistence for compliance cases, behind a CaseRepo
 domain = { path = "../domain" }
 async-trait = "0.1"
 chrono = { workspace = true }
+serde = { workspace = true }
 sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio", "macros", "migrate"] }
 serde_json = "1"
 thiserror = "1"

@@ -24,6 +24,9 @@ impl SqliteAlertRepository {
             label: row.try_get("label")?,
             industry: row.try_get("industry")?,
             company_name_contains: row.try_get("company_name_contains")?,
+            regime: parse_enum_json(row.try_get("regime")?)?,
+            regulator_slug: row.try_get("regulator_slug")?,
+            violation_type: parse_enum_json(row.try_get("violation_type")?)?,
             created_at: parse_datetime(row.try_get("created_at")?)?,
         })
     }
@@ -47,6 +50,30 @@ fn parse_uuid(value: String) -> Result<Uuid, RepositoryError> {
         .map_err(|e| RepositoryError::Decode(format!("invalid uuid '{value}': {e}")))
 }
 
+/// Enum-valued watch-rule criteria (`regime`, `violation_type`) are stored as
+/// serde JSON text so `Other(..)` variants round-trip exactly; NULL means the
+/// criterion isn't set.
+fn parse_enum_json<T: serde::de::DeserializeOwned>(
+    value: Option<String>,
+) -> Result<Option<T>, RepositoryError> {
+    value
+        .map(|json| {
+            serde_json::from_str(&json)
+                .map_err(|e| RepositoryError::Decode(format!("invalid criterion '{json}': {e}")))
+        })
+        .transpose()
+}
+
+fn to_enum_json<T: serde::Serialize>(value: &Option<T>) -> Result<Option<String>, RepositoryError> {
+    value
+        .as_ref()
+        .map(|v| {
+            serde_json::to_string(v)
+                .map_err(|e| RepositoryError::Decode(format!("unserializable criterion: {e}")))
+        })
+        .transpose()
+}
+
 fn parse_datetime(value: String) -> Result<chrono::NaiveDateTime, RepositoryError> {
     chrono::NaiveDateTime::parse_from_str(&value, DATETIME_FORMAT)
         .map_err(|e| RepositoryError::Decode(format!("invalid datetime '{value}': {e}")))
@@ -63,13 +90,18 @@ impl AlertRepository for SqliteAlertRepository {
 
     async fn create_rule(&self, rule: &WatchRule) -> Result<(), RepositoryError> {
         sqlx::query(
-            "INSERT INTO watch_rules (id, label, industry, company_name_contains, created_at)
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO watch_rules
+                (id, label, industry, company_name_contains,
+                 regime, regulator_slug, violation_type, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(rule.id.to_string())
         .bind(&rule.label)
         .bind(&rule.industry)
         .bind(&rule.company_name_contains)
+        .bind(to_enum_json(&rule.regime)?)
+        .bind(&rule.regulator_slug)
+        .bind(to_enum_json(&rule.violation_type)?)
         .bind(rule.created_at.format(DATETIME_FORMAT).to_string())
         .execute(&self.pool)
         .await?;
@@ -159,6 +191,36 @@ mod tests {
         assert_eq!(rules[0].id, rule.id);
         assert_eq!(rules[0].label, "Banking watch");
         assert_eq!(rules[0].industry.as_deref(), Some("Banking"));
+    }
+
+    #[tokio::test]
+    async fn resolution_criteria_roundtrip_including_other_variants() {
+        let repo = in_memory_repo().await;
+        let rule = WatchRule::new("Privacy watch", None, None, now())
+            .with_regime(Some(domain::Regime::DataProtection))
+            .with_regulator_slug(Some("ie-dpc".to_string()))
+            .with_violation_type(Some(domain::ViolationType::Other(
+                "Telemetry Overreach".to_string(),
+            )));
+        repo.create_rule(&rule).await.unwrap();
+
+        let rules = repo.list_rules().await.unwrap();
+
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0], rule);
+    }
+
+    #[tokio::test]
+    async fn rules_without_resolution_criteria_load_with_none() {
+        // Mirrors rows created before migration 0003 (columns NULL).
+        let repo = in_memory_repo().await;
+        repo.create_rule(&demo_rule()).await.unwrap();
+
+        let rules = repo.list_rules().await.unwrap();
+
+        assert_eq!(rules[0].regime, None);
+        assert_eq!(rules[0].regulator_slug, None);
+        assert_eq!(rules[0].violation_type, None);
     }
 
     #[tokio::test]

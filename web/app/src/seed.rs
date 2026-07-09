@@ -2,8 +2,8 @@
 //! Replace with a real repository (see `docs/architecture.md`) once persistence lands.
 
 use domain::{
-    Company, ComplianceCase, Monitor, Regulator, Resolution, ResolutionKind, ResolutionStatus,
-    Sanction, ViolationType,
+    Company, ComplianceCase, Monitor, Regime, Regulator, Resolution, ResolutionKind,
+    ResolutionStatus, Sanction, ViolationType,
 };
 
 pub fn seed_cases() -> Vec<ComplianceCase> {
@@ -18,7 +18,8 @@ fn fictional_bribery_case() -> ComplianceCase {
     );
     let mut case = ComplianceCase::new(company);
     case.resolutions.push(Resolution {
-        regulator: Regulator::Doj,
+        regime: Regime::CorporateProsecution,
+        regulator: Regulator::doj(),
         kind: ResolutionKind::DeferredProsecutionAgreement,
         status: ResolutionStatus::Active,
         signed_on: chrono::NaiveDate::from_ymd_opt(2024, 3, 15),
@@ -48,7 +49,8 @@ fn fictional_sanctions_case() -> ComplianceCase {
     let company = Company::new("Northbridge Financial Group (fictional)", "Banking", "UK");
     let mut case = ComplianceCase::new(company);
     case.resolutions.push(Resolution {
-        regulator: Regulator::Ofac,
+        regime: Regime::SanctionsEnforcement,
+        regulator: Regulator::ofac(),
         kind: ResolutionKind::ConsentOrder,
         status: ResolutionStatus::Completed,
         signed_on: chrono::NaiveDate::from_ymd_opt(2022, 9, 1),

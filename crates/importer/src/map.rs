@@ -28,7 +28,8 @@ pub fn map_resolution(record: &RegistryRecord, today: NaiveDate) -> Resolution {
         // The registry tracks federal organizational prosecutions, which are
         // DoJ actions by definition; parallel regulators (SEC, IRS, ...) are
         // listed in REG_AGENCY but the disposition itself is the DoJ's.
-        regulator: Regulator::Doj,
+        regime: domain::Regime::CorporateProsecution,
+        regulator: Regulator::doj(),
         kind: map_kind(&record.disposition_type),
         status: infer_status(signed_on, term_months, today),
         signed_on,
@@ -493,7 +494,7 @@ mod tests {
         };
         let resolution = map_resolution(&record, date(2026, 7, 2));
 
-        assert_eq!(resolution.regulator, Regulator::Doj);
+        assert_eq!(resolution.regulator, Regulator::doj());
         assert_eq!(
             resolution.kind,
             ResolutionKind::DeferredProsecutionAgreement
